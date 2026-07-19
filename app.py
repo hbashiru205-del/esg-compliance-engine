@@ -151,6 +151,9 @@ with st.sidebar:
         "Gemini API Key",
         type="password",
         placeholder="AIza...",
+    
+        
+
         help="Your key is never stored. Used only for this session."
     )
 
