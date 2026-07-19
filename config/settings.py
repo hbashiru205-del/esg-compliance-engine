@@ -3,11 +3,9 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
-PINECONE_API_KEY  = os.getenv("PINECONE_API_KEY", "")
-PINECONE_INDEX    = os.getenv("PINECONE_INDEX", "esg-compliance")
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
 
-MODEL             = "claude-sonnet-4-6"
+MODEL             = "gemini-2.5-flash"
 MAX_TOKENS        = 1500
 CHUNK_SIZE        = 800
 CHUNK_OVERLAP     = 100
