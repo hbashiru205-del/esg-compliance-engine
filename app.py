@@ -308,3 +308,60 @@ with tab2:
 
         if st.session_state.test_results:
             r = st.session_state.test_results
+            c1, c2, c3 = st.columns(3)
+            with c1:
+                st.markdown(f"""<div class="metric-card">
+                    <div class="metric-value">{r['accuracy_pct']}%</div>
+                    <div class="metric-label">Overall Accuracy</div></div>""",
+                    unsafe_allow_html=True)
+            with c2:
+                st.markdown(f"""<div class="metric-card">
+                    <div class="metric-value">{r['passed']}/{r['total']}</div>
+                    <div class="metric-label">Tests Passed</div></div>""",
+                    unsafe_allow_html=True)
+            with c3:
+                cited = sum(1 for x in r["results"] if x["cited"])
+                st.markdown(f"""<div class="metric-card">
+                    <div class="metric-value">{cited}/{r['total']}</div>
+                    <div class="metric-label">Cited Answers</div></div>""",
+                    unsafe_allow_html=True)
+
+            st.markdown("<br>", unsafe_allow_html=True)
+            for res in r["results"]:
+                status_class = {
+                    "PASS":    "status-pass",
+                    "PARTIAL": "status-partial",
+                    "FAIL":    "status-fail",
+                }[res["status"]]
+                with st.expander(f"{res['question']}  —  [{res['status']}]"):
+                    st.markdown(f"**Status:** <span class='{status_class}'>{res['status']}</span>",
+                                unsafe_allow_html=True)
+                    st.markdown(f"**Cited:** {'✅' if res['cited'] else '❌'}  |  "
+                                f"**Chunks retrieved:** {res['n_chunks']}")
+                    st.markdown("**Answer:**")
+                    st.markdown(f"""<div class="answer-box">{res['answer']}</div>""",
+                                unsafe_allow_html=True)
+
+with tab3:
+    st.markdown("### 📖 How the ESG Compliance Engine Works")
+
+    steps = [
+        ("1. Upload", "You upload your regulatory PDF documents (CSRD, AML, GDPR, internal policies, etc.)."),
+        ("2. Process", "The engine splits each document into intelligent chunks, preserving sentence boundaries."),
+        ("3. Index",   "Each chunk is indexed using TF-IDF scoring — making every section instantly searchable."),
+        ("4. Retrieve","When you ask a question, the system finds the most relevant sections from your documents."),
+        ("5. Generate","Gemini reads only those sections and generates a precise, cited answer."),
+        ("6. Cite",    "Every answer includes exact source references — making it fully audit-ready."),
+    ]
+    for title, desc in steps:
+        st.markdown(f"""
+        <div style='background:#0F2235; border:1px solid #1B3A5C; border-radius:10px;
+        padding:14px 20px; margin:8px 0;'>
+            <b style='color:#2D9CDB'>{title}</b>
+            <p style='color:#A0B4C8; margin:4px 0 0 0; font-size:13px;'>{desc}</p>
+        </div>""", unsafe_allow_html=True)
+
+    st.markdown("### 🔒 Data Privacy")
+    st.markdown("""
+    <div style='background:#0A1F0A; border:1px solid #27AE60; border-radius:10px; padding:16px 20px;'>
+        <p style='color:#A8D5A2; margin:0; font-size:13px;'>
