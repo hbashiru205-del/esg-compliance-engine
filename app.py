@@ -163,3 +163,73 @@ with st.sidebar:
         "Upload regulatory PDFs",
         type=["pdf"],
         accept_multiple_files=True,
+        label_visibility="collapsed"
+    )
+
+    if uploaded:
+        new_files = [f.name for f in uploaded if f.name not in st.session_state.docs_loaded]
+        if new_files:
+            with st.spinner("Processing documents..."):
+                for file in uploaded:
+                    if file.name not in st.session_state.docs_loaded:
+                        chunks, _ = process_pdf(
+                            file.read(), file.name,
+                            chunk_size=CHUNK_SIZE,
+                            overlap=CHUNK_OVERLAP
+                        )
+                        store.add_chunks(chunks)
+                        st.session_state.docs_loaded.append(file.name)
+            st.success(f"✅ {len(new_files)} document(s) indexed")
+
+    if st.session_state.docs_loaded:
+        st.markdown("**Indexed documents:**")
+        for doc in st.session_state.docs_loaded:
+            st.markdown(f"• `{doc}`")
+        st.markdown(f"**Total chunks:** `{store.doc_count}`")
+
+        if st.button("🗑 Clear All Documents"):
+            store.clear()
+            st.session_state.docs_loaded = []
+            st.session_state.chat = []
+            st.rerun()
+
+    st.markdown("---")
+    st.markdown("### 📊 System Stats")
+    col1, col2 = st.columns(2)
+    with col1:
+        st.metric("Chunks", store.doc_count)
+    with col2:
+        st.metric("Docs", len(st.session_state.docs_loaded))
+
+# ── Header ────────────────────────────────────────────────────────────────────
+st.markdown("""
+<div class="header-bar">
+    <h1>⚖️ ESG Compliance Engine</h1>
+    <p>AI-powered regulatory document intelligence — instant, cited, audit-ready answers</p>
+</div>
+""", unsafe_allow_html=True)
+
+# ── Tabs ──────────────────────────────────────────────────────────────────────
+tab1, tab2, tab3 = st.tabs(["💬 Ask Questions", "🧪 Accuracy Test", "📖 How It Works"])
+
+with tab1:
+    if not st.session_state.docs_loaded:
+        st.info("👈 Upload a regulatory PDF in the sidebar to get started.")
+    else:
+        for turn in st.session_state.chat:
+            if turn["role"] == "user":
+                st.markdown(f"""
+                <div style='text-align:right; margin:8px 0'>
+                    <span style='background:#1B3A5C; color:#E8F1FA; padding:10px 16px;
+                    border-radius:18px 18px 4px 18px; display:inline-block;
+                    max-width:80%; font-size:14px;'>{turn["content"]}</span>
+                </div>""", unsafe_allow_html=True)
+            else:
+                answer   = turn["content"]
+                citations = turn.get("citations", [])
+                badge_html = "".join(
+                    f'<span class="citation-badge">{c}</span>' for c in citations
+                )
+                st.markdown(f"""
+                <div class="answer-box">
+                    {answer}
