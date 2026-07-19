@@ -365,3 +365,8 @@ with tab3:
     st.markdown("""
     <div style='background:#0A1F0A; border:1px solid #27AE60; border-radius:10px; padding:16px 20px;'>
         <p style='color:#A8D5A2; margin:0; font-size:13px;'>
+        ✅ Your documents are processed <b>in-session only</b> and never stored permanently.<br>
+        ✅ No document content is used to train any AI model.<br>
+        ✅ Each session starts fresh — your data leaves when you close the tab.
+        </p>
+    </div>""", unsafe_allow_html=True)
