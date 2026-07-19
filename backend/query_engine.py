@@ -1,5 +1,6 @@
-import anthropic
-from config.settings import ANTHROPIC_API_KEY, MODEL, MAX_TOKENS
+from google import genai
+from google.genai import types
+from config.settings import GEMINI_API_KEY, MODEL, MAX_TOKENS
 
 
 SYSTEM_PROMPT = """You are a regulatory compliance analyst. Your job is to answer questions
@@ -32,10 +33,10 @@ def query_compliance(
     api_key: str = None,
     chat_history: list = None,
 ) -> dict:
-    key = api_key or ANTHROPIC_API_KEY
+    key = api_key or GEMINI_API_KEY
     if not key:
         return {
-            "answer": "No API key provided. Please enter your Anthropic API key in the sidebar.",
+            "answer": "No API key provided. Please enter your Gemini API key in the sidebar.",
             "sources_used": [],
             "chunks_retrieved": 0,
         }
@@ -58,22 +59,37 @@ QUESTION: {question}
 
 Provide a clear, cited answer based solely on the excerpts above."""
 
-    messages = []
+    contents = []
     if chat_history:
         for turn in chat_history[-6:]:
-            messages.append({"role": turn["role"], "content": turn["content"]})
-    messages.append({"role": "user", "content": user_message})
-
-    client = anthropic.Anthropic(api_key=key)
-
-    response = client.messages.create(
-        model=MODEL,
-        max_tokens=MAX_TOKENS,
-        system=SYSTEM_PROMPT,
-        messages=messages,
+            role = "model" if turn["role"] == "assistant" else "user"
+            contents.append(
+                types.Content(role=role, parts=[types.Part(text=turn["content"])])
+            )
+    contents.append(
+        types.Content(role="user", parts=[types.Part(text=user_message)])
     )
 
-    answer = response.content[0].text
+    try:
+        client = genai.Client(api_key=key)
+
+        response = client.models.generate_content(
+            model=MODEL,
+            contents=contents,
+            config=types.GenerateContentConfig(
+                system_instruction=SYSTEM_PROMPT,
+                max_output_tokens=MAX_TOKENS,
+            ),
+        )
+
+        answer = response.text
+
+    except Exception as e:
+        return {
+            "answer": f"Error calling Gemini API: {str(e)}",
+            "sources_used": [],
+            "chunks_retrieved": len(retrieved_chunks),
+        }
 
     import re
     sources = list(set(re.findall(r'\[Source:[^\]]+\]', answer)))
@@ -82,4 +98,4 @@ Provide a clear, cited answer based solely on the excerpts above."""
         "answer":           answer,
         "sources_used":     sources,
         "chunks_retrieved": len(retrieved_chunks),
-                            }
+        }
