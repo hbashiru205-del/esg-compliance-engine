@@ -233,3 +233,78 @@ with tab1:
                 st.markdown(f"""
                 <div class="answer-box">
                     {answer}
+                    {'<br><br><b style="color:#5A6473;font-size:11px;">CITED SOURCES:</b><br>' + badge_html if citations else ''}
+                </div>""", unsafe_allow_html=True)
+
+        st.markdown("<br>", unsafe_allow_html=True)
+        col_q, col_btn = st.columns([5, 1])
+        with col_q:
+            question = st.text_input(
+                "Ask a compliance question",
+                placeholder="e.g. What are the Scope 3 emissions disclosure requirements?",
+                label_visibility="collapsed",
+                key="question_input"
+            )
+        with col_btn:
+            ask = st.button("Ask ➤")
+
+        st.markdown("<p style='font-size:11px; color:#3A4F63; margin-top:6px'>Quick questions:</p>",
+                    unsafe_allow_html=True)
+        qcols = st.columns(3)
+        quick_qs = [
+            "What are the main disclosure requirements?",
+            "What penalties apply for non-compliance?",
+            "Who is responsible for compliance oversight?",
+        ]
+        for i, qq in enumerate(quick_qs):
+            with qcols[i]:
+                if st.button(qq, key=f"qq_{i}"):
+                    question = qq
+                    ask = True
+
+        if ask and question.strip():
+            if not api_key:
+                st.error("Please enter your Gemini API key in the sidebar.")
+            else:
+                with st.spinner("Retrieving relevant sections and generating answer..."):
+                    chunks   = store.retrieve(question, top_k=TOP_K)
+                    response = query_compliance(
+                        question, chunks,
+                        api_key=api_key,
+                        chat_history=st.session_state.chat
+                    )
+
+                st.session_state.chat.append({"role": "user",    "content": question})
+                st.session_state.chat.append({
+                    "role":      "assistant",
+                    "content":   response["answer"],
+                    "citations": response["sources_used"],
+                })
+                st.rerun()
+
+        if st.session_state.chat:
+            if st.button("🗑 Clear chat"):
+                st.session_state.chat = []
+                st.rerun()
+
+with tab2:
+    st.markdown("### 🧪 System Accuracy Evaluation")
+    st.markdown(
+        "Runs 5 standard compliance questions against your uploaded documents "
+        "and scores each answer for citation quality and relevance."
+    )
+
+    if not st.session_state.docs_loaded:
+        st.info("Upload a document first to run the accuracy test.")
+    elif not api_key:
+        st.warning("Enter your Gemini API key in the sidebar to run the test.")
+    else:
+        if st.button("▶ Run Accuracy Test"):
+            sys.path.insert(0, os.path.join(os.path.dirname(__file__), "tests"))
+            from tests.accuracy_test import run_accuracy_test
+            with st.spinner("Running 5 test questions... this takes ~30 seconds"):
+                results = run_accuracy_test(store, api_key, top_k=TOP_K)
+            st.session_state.test_results = results
+
+        if st.session_state.test_results:
+            r = st.session_state.test_results
