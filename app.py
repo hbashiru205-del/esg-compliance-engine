@@ -254,12 +254,12 @@ with tab1:
                     ask = True
 
         if ask and question.strip():
-
-                if not api_key:
+            if not api_key:
                 st.error("System configuration issue — please contact support.")
             else:
                 with st.spinner("Retrieving relevant sections and generating answer..."):
                     chunks   = store.retrieve(question, top_k=TOP_K)
+                    response = query_compliance(
                         question, chunks,
                         api_key=api_key,
                         chat_history=st.session_state.chat
@@ -271,6 +271,11 @@ with tab1:
                     "content":   response["answer"],
                     "citations": response["sources_used"],
                 })
+                st.rerun()
+
+        if st.session_state.chat:
+            if st.button("🗑 Clear chat"):
+                st.session_state.chat = []
                 st.rerun()
 
         if st.session_state.chat:
