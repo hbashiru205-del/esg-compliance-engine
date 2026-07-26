@@ -254,7 +254,7 @@ with tab1:
                     ask = True
 
         if ask and question.strip():
-            if not api_key:
+
                 if not api_key:
                 st.error("System configuration issue — please contact support.")
             else:
