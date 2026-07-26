@@ -144,7 +144,7 @@ if "test_results"not in st.session_state: st.session_state.test_results= None
 
 store = st.session_state.store
 
-# ── Sidebar ───────────────────────────────────────────────────────────────────
+
 # ── API key (server-side, invisible to users) ─────────────────────────────────
 api_key = st.secrets.get("GEMINI_API_KEY", "")
 
@@ -264,7 +264,8 @@ with tab1:
 
         if ask and question.strip():
             if not api_key:
-                st.error("Please enter your Gemini API key in the sidebar.")
+                st.error("System configuration issue — please contact support.")
+            
             else:
                 with st.spinner("Retrieving relevant sections and generating answer..."):
                     chunks   = store.retrieve(question, top_k=TOP_K)
