@@ -190,3 +190,70 @@ with st.sidebar:
     with col1:
         st.metric("Chunks", store.doc_count)
     with col2:
+    st.metric("Docs", len(st.session_state.docs_loaded))
+
+# ── Header ────────────────────────────────────────────────────────────────────
+st.markdown("""
+<div class="header-bar">
+    <h1>⚖️ ESG Compliance Engine</h1>
+    <p>AI-powered regulatory document intelligence — instant, cited, audit-ready answers</p>
+</div>
+""", unsafe_allow_html=True)
+
+# ── Tabs ──────────────────────────────────────────────────────────────────────
+tab1, tab2, tab3 = st.tabs(["💬 Ask Questions", "🧪 Accuracy Test", "📖 How It Works"])
+
+with tab1:
+    if not st.session_state.docs_loaded:
+        st.info("👈 Upload a regulatory PDF in the sidebar to get started.")
+    else:
+        for turn in st.session_state.chat:
+            if turn["role"] == "user":
+                st.markdown(f"""
+                <div style='text-align:right; margin:8px 0'>
+                    <span style='background:#1B3A5C; color:#E8F1FA; padding:10px 16px;
+                    border-radius:18px 18px 4px 18px; display:inline-block;
+                    max-width:80%; font-size:14px;'>{turn["content"]}</span>
+                </div>""", unsafe_allow_html=True)
+            else:
+                answer   = turn["content"]
+                citations = turn.get("citations", [])
+                badge_html = "".join(
+                    f'<span class="citation-badge">{c}</span>' for c in citations
+                )
+                st.markdown(f"""
+                <div class="answer-box">
+                    {answer}
+                    {'<br><br><b style="color:#5A6473;font-size:11px;">CITED SOURCES:</b><br>' + badge_html if citations else ''}
+                </div>""", unsafe_allow_html=True)
+
+        st.markdown("<br>", unsafe_allow_html=True)
+        col_q, col_btn = st.columns([5, 1])
+        with col_q:
+            question = st.text_input(
+                "Ask a compliance question",
+                placeholder="e.g. What are the Scope 3 emissions disclosure requirements?",
+                label_visibility="collapsed",
+                key="question_input"
+            )
+        with col_btn:
+            ask = st.button("Ask ➤")
+
+        st.markdown("<p style='font-size:11px; color:#3A4F63; margin-top:6px'>Quick questions:</p>",
+                    unsafe_allow_html=True)
+        qcols = st.columns(3)
+        quick_qs = [
+            "What are the main disclosure requirements?",
+            "What penalties apply for non-compliance?",
+            "Who is responsible for compliance oversight?",
+        ]
+        for i, qq in enumerate(quick_qs):
+            with qcols[i]:
+                if st.button(qq, key=f"qq_{i}"):
+                    question = qq
+                    ask = True
+
+        if ask and question.strip():
+            if not api_key:
+                st.error("System configuration issue — please contact support.")
+    else:
