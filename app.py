@@ -190,7 +190,7 @@ with st.sidebar:
     with col1:
         st.metric("Chunks", store.doc_count)
     with col2:
-    st.metric("Docs", len(st.session_state.docs_loaded))
+            st.metric("Docs", len(st.session_state.docs_loaded))
 
 # ── Header ────────────────────────────────────────────────────────────────────
 st.markdown("""
