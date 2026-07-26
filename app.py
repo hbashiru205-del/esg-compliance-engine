@@ -298,7 +298,8 @@ with tab2:
     if not st.session_state.docs_loaded:
         st.info("Upload a document first to run the accuracy test.")
     elif not api_key:
-        st.warning("Enter your Gemini API key in the sidebar to run the test.")
+        st.warning("System configuration issue — please contact support.")
+        
     else:
         if st.button("▶ Run Accuracy Test"):
             sys.path.insert(0, os.path.join(os.path.dirname(__file__), "tests"))
