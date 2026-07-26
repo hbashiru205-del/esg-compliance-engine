@@ -110,3 +110,83 @@ st.markdown("""
         width: 100%;
         transition: opacity 0.2s;
     }
+    .stButton > button:hover { opacity: 0.88; }
+
+    [data-testid="stFileUploader"] {
+        background-color: #0F2235;
+        border: 1px dashed #1B6CA8;
+        border-radius: 10px;
+        padding: 10px;
+    }
+
+    #MainMenu, footer { visibility: hidden; }
+
+    .stTabs [data-baseweb="tab"] {
+        color: #5A6473;
+        font-weight: 500;
+    }
+    .stTabs [aria-selected="true"] {
+        color: #2D9CDB !important;
+        border-bottom-color: #2D9CDB !important;
+    }
+
+    h1, h2, h3, h4 { color: #E8F1FA; }
+    p, li { color: #A0B4C8; }
+    label { color: #A0B4C8 !important; }
+</style>
+""", unsafe_allow_html=True)
+
+# ── Session state ─────────────────────────────────────────────────────────────
+if "store"       not in st.session_state: st.session_state.store       = VectorStore()
+if "chat"        not in st.session_state: st.session_state.chat        = []
+if "docs_loaded" not in st.session_state: st.session_state.docs_loaded = []
+if "test_results"not in st.session_state: st.session_state.test_results= None
+
+store = st.session_state.store
+
+# ── API key (server-side, invisible to users) ──────────────────────────────────
+api_key = st.secrets.get("GEMINI_API_KEY", "")
+
+# ── Sidebar ───────────────────────────────────────────────────────────────────
+with st.sidebar:
+    st.markdown("### 📄 Upload Documents")
+    uploaded = st.file_uploader(
+        "Upload regulatory PDFs",
+        type=["pdf"],
+        accept_multiple_files=True,
+        label_visibility="collapsed"
+    )
+
+    if uploaded:
+        new_files = [f.name for f in uploaded if f.name not in st.session_state.docs_loaded]
+        if new_files:
+            with st.spinner("Processing documents..."):
+                for file in uploaded:
+                    if file.name not in st.session_state.docs_loaded:
+                        chunks, _ = process_pdf(
+                            file.read(), file.name,
+                            chunk_size=CHUNK_SIZE,
+                            overlap=CHUNK_OVERLAP
+                        )
+                        store.add_chunks(chunks)
+                        st.session_state.docs_loaded.append(file.name)
+            st.success(f"✅ {len(new_files)} document(s) indexed")
+
+    if st.session_state.docs_loaded:
+        st.markdown("**Indexed documents:**")
+        for doc in st.session_state.docs_loaded:
+            st.markdown(f"• `{doc}`")
+        st.markdown(f"**Total chunks:** `{store.doc_count}`")
+
+        if st.button("🗑 Clear All Documents"):
+            store.clear()
+            st.session_state.docs_loaded = []
+            st.session_state.chat = []
+            st.rerun()
+
+    st.markdown("---")
+    st.markdown("### 📊 System Stats")
+    col1, col2 = st.columns(2)
+    with col1:
+        st.metric("Chunks", store.doc_count)
+    with col2:
