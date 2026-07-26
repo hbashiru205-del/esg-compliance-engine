@@ -257,3 +257,72 @@ with tab1:
             if not api_key:
                 st.error("System configuration issue — please contact support.")
     else:
+     with st.spinner("Retrieving relevant sections and generating answer..."):
+                    chunks   = store.retrieve(question, top_k=TOP_K)
+                    response = query_compliance(
+                        question, chunks,
+                        api_key=api_key,
+                        chat_history=st.session_state.chat
+                    )
+
+                st.session_state.chat.append({"role": "user",    "content": question})
+                st.session_state.chat.append({
+                    "role":      "assistant",
+                    "content":   response["answer"],
+                    "citations": response["sources_used"],
+                })
+                st.rerun()
+
+        if st.session_state.chat:
+            if st.button("🗑 Clear chat"):
+                st.session_state.chat = []
+                st.rerun()
+
+with tab2:
+    st.markdown("### 🧪 System Accuracy Evaluation")
+    st.markdown(
+        "Runs 5 standard compliance questions against your uploaded documents "
+        "and scores each answer for citation quality and relevance."
+    )
+
+    if not st.session_state.docs_loaded:
+        st.info("Upload a document first to run the accuracy test.")
+    elif not api_key:
+        st.warning("System configuration issue — please contact support.")
+    else:
+        if st.button("▶ Run Accuracy Test"):
+            sys.path.insert(0, os.path.join(os.path.dirname(__file__), "tests"))
+            from tests.accuracy_test import run_accuracy_test
+            with st.spinner("Running 5 test questions... this takes ~30 seconds"):
+                results = run_accuracy_test(store, api_key, top_k=TOP_K)
+            st.session_state.test_results = results
+
+        if st.session_state.test_results:
+            r = st.session_state.test_results
+            c1, c2, c3 = st.columns(3)
+            with c1:
+                st.markdown(f"""<div class="metric-card">
+                    <div class="metric-value">{r['accuracy_pct']}%</div>
+                    <div class="metric-label">Overall Accuracy</div></div>""",
+                    unsafe_allow_html=True)
+            with c2:
+                st.markdown(f"""<div class="metric-card">
+                    <div class="metric-value">{r['passed']}/{r['total']}</div>
+                    <div class="metric-label">Tests Passed</div></div>""",
+                    unsafe_allow_html=True)
+            with c3:
+                cited = sum(1 for x in r["results"] if x["cited"])
+                st.markdown(f"""<div class="metric-card">
+                    <div class="metric-value">{cited}/{r['total']}</div>
+                    <div class="metric-label">Cited Answers</div></div>""",
+                    unsafe_allow_html=True)
+
+            st.markdown("<br>", unsafe_allow_html=True)
+            for res in r["results"]:
+                status_class = {
+                    "PASS":    "status-pass",
+                    "PARTIAL": "status-partial",
+                    "FAIL":    "status-fail",
+                }[res["status"]]
+                with st.expander(f"{res['question']}  —  [{res['status']}]"):
+
