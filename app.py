@@ -278,10 +278,6 @@ with tab1:
                 st.session_state.chat = []
                 st.rerun()
 
-        if st.session_state.chat:
-            if st.button("🗑 Clear chat"):
-                st.session_state.chat = []
-                st.rerun()
 
 with tab2:
     st.markdown("### 🧪 System Accuracy Evaluation")
