@@ -255,11 +255,11 @@ with tab1:
 
         if ask and question.strip():
             if not api_key:
+                if not api_key:
                 st.error("System configuration issue — please contact support.")
-    else:
-     with st.spinner("Retrieving relevant sections and generating answer..."):
+            else:
+                with st.spinner("Retrieving relevant sections and generating answer..."):
                     chunks   = store.retrieve(question, top_k=TOP_K)
-                    response = query_compliance(
                         question, chunks,
                         api_key=api_key,
                         chat_history=st.session_state.chat
