@@ -145,12 +145,12 @@ if "test_results"not in st.session_state: st.session_state.test_results= None
 store = st.session_state.store
 
 # ── Sidebar ───────────────────────────────────────────────────────────────────
+# ── API key (server-side, invisible to users) ─────────────────────────────────
+api_key = st.secrets.get("GEMINI_API_KEY", "")
+
+# ── Sidebar ───────────────────────────────────────────────────────────────────
 with st.sidebar:
-    st.markdown("### ⚙️ Configuration")
-    api_key = st.text_input(
-        "Gemini API Key",
-        type="password",
-        placeholder="AIza...",
+    st.markdown("### 📄 Upload Documents")
     
         
 
