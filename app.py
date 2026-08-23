@@ -141,7 +141,7 @@ if "store"       not in st.session_state: st.session_state.store       = VectorS
 if "chat"        not in st.session_state: st.session_state.chat        = []
 if "docs_loaded" not in st.session_state: st.session_state.docs_loaded = []
 if "test_results"not in st.session_state: st.session_state.test_results= None
-
+st.session_state.authenticated
 store = st.session_state.store
 
 # ── API key (server-side, invisible to users) ──────────────────────────────────
