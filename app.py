@@ -81,7 +81,79 @@ st.markdown("""
         font-weight: 700;
         color: #2D9CDB;
 }
+.stButton > button:hover { opacity: 0.88; }
 
+    [data-testid="stFileUploader"] {
+        background-color: #0F2235;
+        border: 1px dashed #1B6CA8;
+        border-radius: 10px;
+        padding: 10px;
+    }
+
+    #MainMenu, footer { visibility: hidden; }
+
+    .stTabs [data-baseweb="tab"] {
+        color: #5A6473;
+        font-weight: 500;
+    }
+    .stTabs [aria-selected="true"] {
+        color: #2D9CDB !important;
+        border-bottom-color: #2D9CDB !important;
+    }
+
+    h1, h2, h3, h4 { color: #E8F1FA; }
+    p, li { color: #A0B4C8; }
+    label { color: #A0B4C8 !important; }
+</style>
+""", unsafe_allow_html=True)
+
+# ── Session state ─────────────────────────────────────────────────────────────
+if "store"       not in st.session_state: st.session_state.store       = VectorStore()
+if "chat"        not in st.session_state: st.session_state.chat        = []
+if "docs_loaded" not in st.session_state: st.session_state.docs_loaded = []
+if "test_results"not in st.session_state: st.session_state.test_results= None
+if "authenticated" not in st.session_state: st.session_state.authenticated = False
+
+# ── Access Gate ──────────────────────────────────────────────────────────────
+VALID_CODES = [c.strip() for c in st.secrets.get("ACCESS_CODES", "").split(",") if c.strip()]
+
+if not st.session_state.authenticated:
+    st.markdown("### Access Required")
+    st.markdown("Enter the access code provided to you to continue.")
+    code_input = st.text_input("Access code", type="password")
+    if st.button("Enter"):
+        if code_input.strip() in VALID_CODES:
+            st.session_state.authenticated = True
+            st.rerun()
+        else:
+            st.error("Invalid access code. Contact hello@clarixintel.com for access.")
+    st.stop()
+
+# ── API key (server-side, invisible to users) ──────────────────────────────────
+api_key = st.secrets.get("GEMINI_API_KEY", "")
+
+store = st.session_state.store
+
+# ── Sidebar ───────────────────────────────────────────────────────────────────
+with st.sidebar:
+    st.markdown("### 📄 Upload Documents")
+    uploaded = st.file_uploader(
+        "Upload regulatory PDFs",
+        type=["pdf"],
+        accept_multiple_files=True,
+        label_visibility="collapsed"
+    )
+
+    if uploaded:
+        new_files = [f.name for f in uploaded if f.name not in st.session_state.docs_loaded]
+        if new_files:
+            with st.spinner("Processing documents..."):
+                for file in uploaded:
+                    if file.name not in st.session_state.docs_loaded:
+                        chunks, _ = process_pdf(
+                            file.read(), file.name,
+                            chunk_size=CHUNK_SIZE,
+                            overlap=CHUNK_OVERLAP
     
 
     
