@@ -298,7 +298,7 @@ with tab2:
                     <div class="metric-label">Tests Passed</div></div>""",
                     unsafe_allow_html=True)
             with c3:
-    cited = sum(1 for x in r["results"] if x["cited"])
+                         cited = sum(1 for x in r["results"] if x["cited"])
                 st.markdown(f"""<div class="metric-card">
                     <div class="metric-value">{cited}/{r['total']}</div>
                     <div class="metric-label">Cited Answers</div></div>""",
