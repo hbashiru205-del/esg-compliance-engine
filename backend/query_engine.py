@@ -1,4 +1,4 @@
- from google import genai
+from google import genai
 from google.genai import types
 from config.settings import GEMINI_API_KEY, MODEL, MAX_TOKENS
 
