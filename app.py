@@ -254,9 +254,11 @@ with tab1:
 
                 st.session_state.chat.append({"role": "user",    "content": question})
                 st.session_state.chat.append({
-                    "role":      "assistant",
-                    "content":   response["answer"],
-                    "citations": response["sources_used"],
+                    "role":       "assistant",
+                    "content":    response["answer"],
+                    "answer_only":response["answer"],
+                    "reasoning":  response.get("reasoning", ""),
+                    "citations":  response["sources_used"],
                 })
                 st.rerun()
 
