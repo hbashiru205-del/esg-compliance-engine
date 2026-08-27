@@ -204,7 +204,11 @@ with tab1:
                 </div>""", unsafe_allow_html=True)
             else:
                 answer   = turn["content"]
+                reasoning = turn.get("reasoning", "")
                 citations = turn.get("citations", [])
+                if reasoning:
+                    with st.expander("🔍 Show reasoning"):
+                        st.markdown(reasoning)
                 badge_html = "".join(
                     f'<span class="citation-badge">{c}</span>' for c in citations
                 )
