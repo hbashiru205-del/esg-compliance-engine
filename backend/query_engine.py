@@ -127,8 +127,17 @@ REASONING: / ANSWER: format specified."""
         raw_text = response.text
 
     except Exception as e:
+        error_str = str(e)
+        print(f"[Clarix] Gemini API error: {error_str}")  # server-side log only, not shown to users
+
+        lower = error_str.lower()
+        if any(term in lower for term in ["429", "quota", "resource_exhausted", "rate limit"]):
+            user_message = "We're experiencing high demand right now. Please wait a moment and try again."
+        else:
+            user_message = "Something went wrong generating this answer. Please try again — if it keeps happening, contact hello@clarixintel.com."
+
         return {
-            "answer": f"Error calling Gemini API: {str(e)}",
+            "answer": user_message,
             "reasoning": "",
             "sources_used": [],
             "chunks_retrieved": len(retrieved_chunks),
