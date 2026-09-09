@@ -1,4 +1,5 @@
-import sys
+impo st.sidebar:
+    import sys
 import os
 sys.path.insert(0, os.path.dirname(__file__))
 
@@ -127,6 +128,15 @@ if not st.session_state.authenticated:
             st.rerun()
         else:
             st.error("Invalid access code. Contact hello@clarixintel.com for access.")
+
+    payment_contact = "hello@clarixintel.com"
+    st.markdown("---")
+    st.markdown(
+        f"**Don't have a code?** "
+        f"[Email us for access →](mailto:{payment_contact}?subject=Clarix%20Access%20Request) "
+        "— we'll send a payment link and your access code together."
+    )
+
     st.stop()
 
 # ── API key (server-side, invisible to users) ──────────────────────────────────
@@ -356,9 +366,3 @@ with tab3:
         ℹ️ For engagements involving proprietary or sensitive material, ask about our enterprise data terms — standard sessions run on infrastructure suited to public and general regulatory documents.
         </p>
     </div>""", unsafe_allow_html=True)
-    
-    
-    
-
-    
-
