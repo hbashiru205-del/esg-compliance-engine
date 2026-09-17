@@ -66,6 +66,12 @@ class VectorStore:
         self._built = True
 
     def retrieve(self, query: str, top_k: int = 5):
+        """
+        Retrieves the top_k most relevant chunks.
+        If multiple source documents are present, balances retrieval
+        across documents so a comparison question can't be starved of
+        one document's chunks by the other dominating raw similarity.
+        """
         if not self._built:
             self._build_index()
 
@@ -75,11 +81,29 @@ class VectorStore:
         scores = [(_cosine(q_vec, v), i) for i, v in enumerate(self.vectors)]
         scores.sort(reverse=True)
 
+        unique_sources = list(set(c.get("source", "unknown") for c in self.chunks))
+
+        if len(unique_sources) > 1:
+            per_doc_k = max(2, top_k // len(unique_sources))
+            results = []
+            seen_per_source = {src: 0 for src in unique_sources}
+
+            for score, idx in scores:
+                if score <= 0:
+                    continue
+                src = self.chunks[idx].get("source", "unknown")
+                if seen_per_source[src] < per_doc_k:
+                    results.append({**self.chunks[idx], "score": round(score, 4)})
+                    seen_per_source[src] += 1
+                if len(results) >= top_k:
+                    break
+
+            return results
+
         results = []
         for score, idx in scores[:top_k]:
             if score > 0:
                 results.append({**self.chunks[idx], "score": round(score, 4)})
-
         return results
 
     def clear(self):
@@ -91,3 +115,7 @@ class VectorStore:
     @property
     def doc_count(self):
         return len(self.chunks)
+
+    @property
+    def source_count(self):
+        return len(set(c.get("source", "unknown") for c in self.chunks))

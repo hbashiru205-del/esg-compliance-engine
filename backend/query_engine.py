@@ -14,7 +14,10 @@ REASONING PROCESS — follow this for every answer:
 3. Check for any cross-references to other sections/articles (e.g. "as defined in Article X") —
    if a referenced section is NOT included in the excerpts provided, explicitly flag this rather
    than assuming the exception doesn't apply.
-4. Apply the rule and any relevant exceptions to reach a final answer.
+4. If excerpts come from MORE THAN ONE source document, explicitly compare them: state what each
+   document says on the relevant point, label which document each claim comes from, and note
+   where they align, differ, or where one is stricter or more specific than the other.
+5. Apply the rule, any relevant exceptions, and any cross-document comparison to reach a final answer.
 
 RULES YOU MUST FOLLOW:
 1. Only use information from the provided excerpts to answer.
@@ -25,10 +28,13 @@ RULES YOU MUST FOLLOW:
    "This may be qualified by [reference], which is not included in the retrieved excerpts —
    recommend verifying."
 6. If multiple excerpts are relevant, synthesize them and cite each one used.
+7. If the question asks how requirements differ between documents (e.g. between a baseline
+   standard and a specific jurisdiction's implementation), structure your answer to address
+   each document's position explicitly, by name, before giving a combined conclusion.
 
 OUTPUT FORMAT — structure your response EXACTLY like this, with these two labels on their own lines:
 REASONING: [Your step-by-step reasoning process — 2-4 sentences walking through the rule,
-any exceptions found, and any cross-references checked]
+any exceptions found, any cross-references checked, and any cross-document comparison made]
 ANSWER: [Your final, clear answer with citations]
 """
 
@@ -39,16 +45,21 @@ def build_context(retrieved_chunks: list) -> str:
         source = chunk.get("source", "Unknown")
         text   = chunk.get("text", "")
         context_parts.append(
-            f"--- Excerpt {i} [Source: {source}, Chunk #{chunk.get('index', i)}] ---\n{text}"
+            f"--- Excerpt {i} [DOCUMENT: {source}, Chunk #{chunk.get('index', i)}] ---\n{text}"
         )
+
+    unique_sources = sorted(set(c.get("source", "Unknown") for c in retrieved_chunks))
+    if len(unique_sources) > 1:
+        header = (
+            f"NOTE: These excerpts come from {len(unique_sources)} different documents: "
+            f"{', '.join(unique_sources)}. Compare them explicitly where relevant.\n\n"
+        )
+        return header + "\n\n".join(context_parts)
+
     return "\n\n".join(context_parts)
 
 
 def parse_reasoning_response(raw_text: str) -> dict:
-    """
-    Splits model output into reasoning + answer sections.
-    Falls back gracefully if the model didn't use the exact format.
-    """
     reasoning = ""
     answer = raw_text.strip()
 
@@ -127,17 +138,8 @@ REASONING: / ANSWER: format specified."""
         raw_text = response.text
 
     except Exception as e:
-        error_str = str(e)
-        print(f"[Clarix] Gemini API error: {error_str}")  # server-side log only, not shown to users
-
-        lower = error_str.lower()
-        if any(term in lower for term in ["429", "quota", "resource_exhausted", "rate limit"]):
-            user_message = "We're experiencing high demand right now. Please wait a moment and try again."
-        else:
-            user_message = "Something went wrong generating this answer. Please try again — if it keeps happening, contact hello@clarixintel.com."
-
         return {
-            "answer": user_message,
+            "answer": f"Error calling Gemini API: {str(e)}",
             "reasoning": "",
             "sources_used": [],
             "chunks_retrieved": len(retrieved_chunks),
@@ -153,4 +155,4 @@ REASONING: / ANSWER: format specified."""
         "reasoning":        parsed["reasoning"],
         "sources_used":     sources,
         "chunks_retrieved": len(retrieved_chunks),
-}
+    }
