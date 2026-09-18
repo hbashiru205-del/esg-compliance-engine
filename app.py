@@ -128,12 +128,10 @@ if not st.session_state.authenticated:
         else:
             st.error("Invalid access code. Contact hello@clarixintel.com for access.")
 
-    payment_contact = "hello@clarixintel.com"
     st.markdown("---")
     st.markdown(
-        f"**Don't have a code?** "
-        f"[Email us for access →](mailto:{payment_contact}?subject=Clarix%20Access%20Request) "
-        "— we'll send a payment link and your access code together."
+        "**Don't have a code?** "
+        "[Get in touch →](mailto:hello@clarixintel.com?subject=Clarix%20Access%20Request)"
     )
 
     st.stop()
