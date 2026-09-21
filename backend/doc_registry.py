@@ -4,6 +4,11 @@ import io
 import pypdf
 from backend.identity_intent import wants_identity
 
+# Shown to the model, and by it, back to the person as the chunk tag in
+# every citation for one of these records — e.g. "[Source: sfdr.pdf,
+# Chunk #Document Info]" — so it needs to read like a real citation.
+RECORD_LABEL = "Document Info"
+
 
 class DocRegistry:
     def __init__(self):
@@ -54,7 +59,7 @@ class DocRegistry:
     def identity_chunks(self) -> list:
         cap = 1500 if len(self.docs) <= 3 else 600
         return [{"source": name, "text": self._record(info, cap),
-                 "index": "document record", "score": 1.0}
+                 "index": RECORD_LABEL, "score": 1.0}
                 for name, info in self.docs.items()]
 
     def add_identity_context(self, question: str, chunks: list) -> list:
