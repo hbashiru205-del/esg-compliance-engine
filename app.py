@@ -4,8 +4,10 @@ sys.path.insert(0, os.path.dirname(__file__))
 
 import streamlit as st
 from backend.document_processor import process_pdf
-from backend.vector_store import VectorStore
+from backend.balanced_store import BalancedStore as VectorStore
 from backend.query_engine import query_compliance
+from backend.doc_registry import DocRegistry
+from backend.export_ui import export_buttons
 from config.settings import CHUNK_SIZE, CHUNK_OVERLAP, TOP_K
 
 # ── Page config ──────────────────────────────────────────────────────────────
@@ -99,8 +101,7 @@ st.markdown("""
     .stTabs [aria-selected="true"] {
         color: #2D9CDB !important;
         border-bottom-color: #2D9CDB !important;
-    }
-
+    }/* -- part 2/7 -- */
     h1, h2, h3, h4 { color: #E8F1FA; }
     p, li { color: #A0B4C8; }
     label { color: #A0B4C8 !important; }
@@ -113,6 +114,7 @@ if "chat"        not in st.session_state: st.session_state.chat        = []
 if "docs_loaded" not in st.session_state: st.session_state.docs_loaded = []
 if "test_results"not in st.session_state: st.session_state.test_results= None
 if "authenticated" not in st.session_state: st.session_state.authenticated = False
+if "registry"    not in st.session_state: st.session_state.registry    = DocRegistry()
 
 # ── Access Gate ──────────────────────────────────────────────────────────────
 VALID_CODES = [c.strip() for c in st.secrets.get("ACCESS_CODES", "").split(",") if c.strip()]
@@ -140,6 +142,7 @@ if not st.session_state.authenticated:
 api_key = st.secrets.get("GEMINI_API_KEY", "")
 
 store = st.session_state.store
+registry = st.session_state.registry
 
 # ── Sidebar ───────────────────────────────────────────────────────────────────
 with st.sidebar:
@@ -149,19 +152,20 @@ with st.sidebar:
         type=["pdf"],
         accept_multiple_files=True,
         label_visibility="collapsed"
-    )
-
+)# -- part 3/7 --
     if uploaded:
         new_files = [f.name for f in uploaded if f.name not in st.session_state.docs_loaded]
         if new_files:
             with st.spinner("Processing documents..."):
                 for file in uploaded:
                     if file.name not in st.session_state.docs_loaded:
+                        raw = file.read()
                         chunks, _ = process_pdf(
-                            file.read(), file.name,
+                            raw, file.name,
                             chunk_size=CHUNK_SIZE,
                             overlap=CHUNK_OVERLAP
-)
+                        )
+                        registry.add(file.name, raw)
                         store.add_chunks(chunks)
                         st.session_state.docs_loaded.append(file.name)
             st.success(f"✅ {len(new_files)} document(s) indexed")
@@ -174,6 +178,7 @@ with st.sidebar:
 
         if st.button("🗑 Clear All Documents"):
             store.clear()
+            registry.clear()
             st.session_state.docs_loaded = []
             st.session_state.chat = []
             st.rerun()
@@ -195,8 +200,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ── Tabs ──────────────────────────────────────────────────────────────────────
-tab1, tab2, tab3 = st.tabs(["💬 Ask Questions", "🧪 Accuracy Test", "📖 How It Works"])
-
+tab1, tab2, tab3 = st.tabs(["💬 Ask Questions", "🧪 Accuracy Test", "📖 How It Works"])# -- part 4/7 --
 with tab1:
     if not st.session_state.docs_loaded:
         st.info("👈 Upload a regulatory PDF in the sidebar to get started.")
@@ -249,14 +253,14 @@ with tab1:
             with qcols[i]:
                 if st.button(qq, key=f"qq_{i}"):
                     question = qq
-                    ask = True
-
+                    ask = True# -- part 5/7 --
         if ask and question.strip():
             if not api_key:
                 st.error("System configuration issue — please contact support.")
             else:
                 with st.spinner("Retrieving relevant sections and generating answer..."):
                     chunks   = store.retrieve(question, top_k=TOP_K)
+                    chunks   = registry.add_identity_context(question, chunks)
                     response = query_compliance(
                         question, chunks,
                         api_key=api_key,
@@ -277,6 +281,7 @@ with tab1:
             if st.button("🗑 Clear chat"):
                 st.session_state.chat = []
                 st.rerun()
+            export_buttons(st, st.session_state.chat, registry)
 
 with tab2:
     st.markdown("### 🧪 System Accuracy Evaluation")
@@ -295,8 +300,7 @@ with tab2:
             from tests.accuracy_test import run_accuracy_test
             with st.spinner("Running 5 test questions... this takes ~30 seconds"):
                 results = run_accuracy_test(store, api_key, top_k=TOP_K)
-            st.session_state.test_results = results
-
+            st.session_state.test_results = results# -- part 6/7 --
         if st.session_state.test_results:
             r = st.session_state.test_results
             c1, c2, c3 = st.columns(3)
@@ -336,8 +340,7 @@ with tab2:
                                 unsafe_allow_html=True)
 
 with tab3:
-    st.markdown("### 📖 How the ESG Compliance Engine Works")
-
+    st.markdown("### 📖 How the ESG Compliance Engine Works")# -- part 7/7 --
     steps = [
         ("1. Upload", "You upload your regulatory PDF documents (CSRD, AML, GDPR, internal policies, etc.)."),
         ("2. Process", "The engine splits each document into intelligent chunks, preserving sentence boundaries."),
@@ -363,9 +366,3 @@ with tab3:
         ℹ️ For engagements involving proprietary or sensitive material, ask about our enterprise data terms — standard sessions run on infrastructure suited to public and general regulatory documents.
         </p>
     </div>""", unsafe_allow_html=True)
-    
-    
-    
-
-    
-
