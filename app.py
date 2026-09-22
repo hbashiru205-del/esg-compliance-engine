@@ -3,7 +3,7 @@ import os
 sys.path.insert(0, os.path.dirname(__file__))
 
 import streamlit as st
-from backend.document_processor import process_pdf
+from backend.pdf_extract import process_pdf
 from backend.balanced_store import BalancedStore as VectorStore
 from backend.query_engine import query_compliance
 from backend.doc_registry import DocRegistry
