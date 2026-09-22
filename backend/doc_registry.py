@@ -2,6 +2,7 @@
 index: nothing here is chunked, scored or written by the model."""
 import io
 import pypdf
+import pdfplumber
 from backend.identity_intent import wants_identity
 
 # Shown to the model, and by it, back to the person as the chunk tag in
@@ -17,19 +18,27 @@ class DocRegistry:
     def add(self, filename: str, file_bytes: bytes) -> dict:
         info = {"filename": filename, "pages": None, "props": {},
                 "first_page": None, "first_page_no": None}
+        # Properties (title/author/subject) aren't affected by the
+        # extract_text() word-splitting bug pdf_extract.py works around,
+        # so pypdf is fine for those; only the page count and the actual
+        # first-page text use pdfplumber, for the same reason pdf_extract.py
+        # does -- see that file's docstring.
         try:
-            reader = pypdf.PdfReader(io.BytesIO(file_bytes))
-            info["pages"] = len(reader.pages)
-            meta = reader.metadata
+            meta = pypdf.PdfReader(io.BytesIO(file_bytes)).metadata
             for key in ("title", "author", "subject"):
                 val = str(getattr(meta, key, None) or "").strip()
                 if val:
                     info["props"][key] = val
-            for n in range(min(3, len(reader.pages))):
-                text = (reader.pages[n].extract_text() or "").strip()
-                if text:
-                    info["first_page"], info["first_page_no"] = text, n + 1
-                    break
+        except Exception:
+            pass
+        try:
+            with pdfplumber.open(io.BytesIO(file_bytes)) as pdf:
+                info["pages"] = len(pdf.pages)
+                for n in range(min(3, len(pdf.pages))):
+                    text = (pdf.pages[n].extract_text() or "").strip()
+                    if text:
+                        info["first_page"], info["first_page_no"] = text, n + 1
+                        break
         except Exception:
             pass  # a registry problem must never block indexing
         self.docs[filename] = info
