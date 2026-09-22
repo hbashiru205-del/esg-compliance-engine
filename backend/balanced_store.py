@@ -55,20 +55,38 @@ class BalancedStore(VectorStore):
     def retrieve(self, query: str, top_k: int = 5):
         if not self._built:
             self._build_index()
-        q_vec = _tfidf_vector(_tokenize(query), self.vocab)
-        scored = [(_cosine(q_vec, v), i) for i, v in enumerate(self.vectors)]
+        q_tokens = _tokenize(query)
+        q_vec = _tfidf_vector(q_tokens, self.vocab)
+
+        # A query token that IS a number/identifier ("24", "2022/2464").
+        # A chunk containing that exact token is pulled ahead of chunks
+        # that only share generic words with the question -- otherwise,
+        # in a large document where nearly every chunk repeats a word
+        # like "article", one specific numbered article can be outranked
+        # by unrelated chunks and never reach the top_k at all, even
+        # though it is the one chunk that actually answers the question.
+        q_nums = {t for t in q_tokens if _NUM_RE.fullmatch(t)}
+
+        def rank(i):
+            cos = _cosine(q_vec, self.vectors[i])
+            exact = bool(q_nums) and any(n in self.vectors[i] for n in q_nums)
+            return (exact, cos)
+
+        scored = [(rank(i), i) for i in range(len(self.vectors))]
         scored.sort(reverse=True)
 
         by_src = {}
-        for s, i in scored:
-            if s > 0:
-                src = self.chunks[i].get("source", "unknown")
-                by_src.setdefault(src, []).append((s, i))
+        for key, i in scored:
+            exact, cos = key
+            if not exact and cos <= 0:
+                continue
+            src = self.chunks[i].get("source", "unknown")
+            by_src.setdefault(src, []).append((key, i))
         if not by_src:
             return []
 
         # Documents ordered by their best match, then one chunk each per round.
-        order = sorted(by_src, key=lambda k: by_src[k][0], reverse=True)
+        order = sorted(by_src, key=lambda k: by_src[k][0][0], reverse=True)
         picked, depth = [], 0
         while len(picked) < top_k:
             added = False
@@ -81,4 +99,5 @@ class BalancedStore(VectorStore):
             depth += 1
 
         picked.sort(reverse=True)
-        return [{**self.chunks[i], "score": round(s, 4)} for s, i in picked]
+        return [{**self.chunks[i], "score": round(key[1], 4)}
+                for key, i in picked]
