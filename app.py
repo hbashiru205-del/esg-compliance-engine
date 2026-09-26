@@ -221,6 +221,7 @@ with tab1:
                 if reasoning:
                     with st.expander("🔍 Show reasoning"):
                         st.markdown(reasoning)
+                render_excerpts(st, turn.get("excerpts", []))
                 badge_html = "".join(
                     f'<span class="citation-badge">{c}</span>' for c in citations
                 )
@@ -275,19 +276,18 @@ with tab1:
                     "answer_only":response["answer"],
                     "reasoning":  response.get("reasoning", ""),
                     "citations":  response["sources_used"],
-                st.session_state.chat.append({"role": "user",    "content": question})
-                st.session_state.chat.append({
-                    "role":       "assistant",
-                    "content":    response["answer"],
-                    "answer_only":response["answer"],
-                    "reasoning":  response.get("reasoning", ""),
-                    "citations":  response["sources_used"],
                     "excerpts":   make_excerpt_records(chunks),
                 })
+                st.rerun()
+
+        if st.session_state.chat:
+            if st.button("🗑 Clear chat"):
+                st.session_state.chat = []
+                st.rerun()
+            export_buttons(st, st.session_state.chat, registry)
 
 with tab2:
     st.markdown("### 🧪 System Accuracy Evaluation")
-    render_excerpts(st, turn.get("excerpts", []))
     st.markdown(
         "Runs 5 standard compliance questions against your uploaded documents "
         "and scores each answer for citation quality and relevance."
@@ -302,12 +302,12 @@ with tab2:
             sys.path.insert(0, os.path.join(os.path.dirname(__file__), "tests"))
             from tests.accuracy_test import run_accuracy_test
             with st.spinner("Running 5 test questions... this takes ~30 seconds"):
-                results = run_accuracy_test(store, api_key, top_k=TOP_K)
+                results = run_accuracy_test(store, api_key, top_k=TOP_K, registry=registry)
             st.session_state.test_results = results# -- part 6/7 --
         if st.session_state.test_results:
             r = st.session_state.test_results
             c1, c2, c3 = st.columns(3)
-            results = run_accuracy_test(store, api_key, top_k=TOP_K, registry=registry)
+            with c1:
                 st.markdown(f"""<div class="metric-card">
                     <div class="metric-value">{r['accuracy_pct']}%</div>
                     <div class="metric-label">Overall Accuracy</div></div>""",
@@ -366,6 +366,6 @@ with tab3:
         <p style='color:#A8D5A2; margin:0; font-size:13px;'>
         ✅ Your documents are processed <b>in-session only</b> and never stored permanently.<br>
         ✅ Each session starts fresh — your data leaves when you close the tab.<br>
-        ℹ️ For engagements involving proprietary or sensitive material, ask about our enterprise data terms — standard sessions run on infrastructure suited to public and general regulatory documents.
+        ℹ️ Standard sessions currently run on shared processing infrastructure suited to public and general regulatory documents. Dedicated private infrastructure is being rolled out for client engagements.
         </p>
     </div>""", unsafe_allow_html=True)
