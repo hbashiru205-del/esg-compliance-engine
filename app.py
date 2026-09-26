@@ -282,6 +282,7 @@ with tab1:
             if st.button("🗑 Clear chat"):
                 st.session_state.chat = []
                 st.rerun()
+                "excerpts": make_excerpt_records(chunks),
             export_buttons(st, st.session_state.chat, registry)
 
 with tab2:
