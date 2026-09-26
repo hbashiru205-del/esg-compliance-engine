@@ -7,7 +7,7 @@ from backend.pdf_extract import process_pdf
 from backend.balanced_store import BalancedStore as VectorStore
 from backend.query_engine import query_compliance
 from backend.doc_registry import DocRegistry
-from backend.export_ui import export_buttons
+from backend.excerpts_ui import make_excerpt_records, render_excerpts
 from config.settings import CHUNK_SIZE, CHUNK_OVERLAP, TOP_K
 
 # ── Page config ──────────────────────────────────────────────────────────────
