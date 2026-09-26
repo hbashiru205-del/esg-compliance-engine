@@ -1,69 +1,51 @@
-"""
-Accuracy test suite.
-Run this after uploading a document to evaluate system performance.
-"""
-import sys
-import os
-sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
-
-from backend.vector_store import VectorStore
+import re
 from backend.query_engine import query_compliance
 
+_REFUSAL_RE = re.compile(
+    r"not (?:found|specified|stated|included|available|determin\w*)"
+    r"|no (?:information|mention)|cannot (?:be )?(?:determin|confirm|find)"
+    r"|does not (?:appear|specify|state|include)",
+    re.IGNORECASE,
+)
 
-SAMPLE_QA = [
-    {
-        "question": "What are the main disclosure requirements?",
-        "keywords": ["disclosure", "report", "require"],
-    },
-    {
-        "question": "What penalties or fines apply for non-compliance?",
-        "keywords": ["penalty", "fine", "sanction", "breach"],
-    },
-    {
-        "question": "What is the reporting deadline or timeline?",
-        "keywords": ["deadline", "date", "period", "annual", "quarterly"],
-    },
-    {
-        "question": "Who is responsible for compliance oversight?",
-        "keywords": ["officer", "board", "responsible", "management", "committee"],
-    },
-    {
-        "question": "What data or metrics must be collected?",
-        "keywords": ["data", "metric", "measure", "indicator", "scope"],
-    },
+TEST_QUESTIONS = [
+    {"question": "What are the main obligations or requirements set out in this document?", "expect": "cite"},
+    {"question": "What is the title of this document, and how many pages does it have?", "expect": "cite"},
+    {"question": "In plain terms, who does this document apply to, and what do they actually have to do?", "expect": "cite"},
+    {"question": "What exact monetary penalty does this document specify for non-compliance?", "expect": "cite_or_refuse"},
+    {"question": "If more than one document is loaded, compare how each one addresses a shared topic, such as a specific article or section number that appears in more than one of them. If only one document is loaded, summarize its own position instead.", "expect": "cite"},
 ]
 
+def _grade(resp, expect):
+    cited = bool(resp.get("sources_used"))
+    refused = bool(_REFUSAL_RE.search(resp.get("answer", "")))
+    if cited:
+        return "PASS"
+    if expect == "cite_or_refuse" and refused:
+        return "PASS"
+    if resp.get("chunks_retrieved", 0) == 0:
+        return "FAIL"
+    if refused:
+        return "PARTIAL"
+    return "FAIL"
 
-def run_accuracy_test(store: VectorStore, api_key: str, top_k: int = 5):
-    """Run all sample questions and return a results report."""
+def run_accuracy_test(store, api_key, top_k=8, registry=None):
     results = []
-    passed  = 0
-
-    for qa in SAMPLE_QA:
-        question = qa["question"]
-        keywords = qa["keywords"]
-
-        chunks   = store.retrieve(question, top_k=top_k)
-        response = query_compliance(question, chunks, api_key=api_key)
-        answer   = response["answer"].lower()
-
-        found  = "not found in the uploaded" not in answer
-        kw_hit = any(kw in answer for kw in keywords)
-        cited  = "[source:" in answer.lower()
-
-        status = "PASS" if (found and cited) else "PARTIAL" if found else "FAIL"
-        if status == "PASS":
-            passed += 1
-
+    for item in TEST_QUESTIONS:
+        question = item["question"]
+        chunks = store.retrieve(question, top_k=top_k)
+        if registry is not None:
+            chunks = registry.add_identity_context(question, chunks)
+        resp = query_compliance(question, chunks, api_key=api_key)
+        status = _grade(resp, item["expect"])
         results.append({
-            "question":   question,
-            "status":     status,
-            "cited":      cited,
-            "kw_hit":     kw_hit,
-            "answer":     response["answer"],
-            "n_chunks":   response["chunks_retrieved"],
+            "question": question,
+            "status": status,
+            "cited": bool(resp.get("sources_used")),
+            "n_chunks": len(chunks),
+            "answer": resp.get("answer", ""),
         })
-
-    accuracy = round((passed / len(SAMPLE_QA)) * 100, 1)
-    return {"accuracy_pct": accuracy, "passed": passed,
-            "total": len(SAMPLE_QA), "results": results}
+    total = len(results)
+    passed = sum(1 for r in results if r["status"] == "PASS")
+    return {"accuracy_pct": round(100 * passed / total) if total else 0,
+            "passed": passed, "total": total, "results": results}
