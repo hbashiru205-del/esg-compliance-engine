@@ -286,6 +286,7 @@ with tab1:
 
 with tab2:
     st.markdown("### 🧪 System Accuracy Evaluation")
+    render_excerpts(st, turn.get("excerpts", []))
     st.markdown(
         "Runs 5 standard compliance questions against your uploaded documents "
         "and scores each answer for citation quality and relevance."
