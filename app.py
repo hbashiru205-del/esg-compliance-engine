@@ -307,7 +307,7 @@ with tab2:
         if st.session_state.test_results:
             r = st.session_state.test_results
             c1, c2, c3 = st.columns(3)
-            with c1:
+            results = run_accuracy_test(store, api_key, top_k=TOP_K, registry=registry)
                 st.markdown(f"""<div class="metric-card">
                     <div class="metric-value">{r['accuracy_pct']}%</div>
                     <div class="metric-label">Overall Accuracy</div></div>""",
