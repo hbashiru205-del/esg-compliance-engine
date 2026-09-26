@@ -275,15 +275,15 @@ with tab1:
                     "answer_only":response["answer"],
                     "reasoning":  response.get("reasoning", ""),
                     "citations":  response["sources_used"],
+                st.session_state.chat.append({"role": "user",    "content": question})
+                st.session_state.chat.append({
+                    "role":       "assistant",
+                    "content":    response["answer"],
+                    "answer_only":response["answer"],
+                    "reasoning":  response.get("reasoning", ""),
+                    "citations":  response["sources_used"],
+                    "excerpts":   make_excerpt_records(chunks),
                 })
-                st.rerun()
-
-        if st.session_state.chat:
-            if st.button("🗑 Clear chat"):
-                st.session_state.chat = []
-                st.rerun()
-                "excerpts": make_excerpt_records(chunks),
-            export_buttons(st, st.session_state.chat, registry)
 
 with tab2:
     st.markdown("### 🧪 System Accuracy Evaluation")
