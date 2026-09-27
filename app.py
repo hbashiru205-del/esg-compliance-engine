@@ -9,6 +9,7 @@ from backend.query_engine import query_compliance
 from backend.doc_registry import DocRegistry
 from backend.export_ui import export_buttons
 from backend.excerpts_ui import make_excerpt_records, render_excerpts
+from backend.trial_gate import trial_exceeded, render_trial_status, render_trial_blocked
 from config.settings import CHUNK_SIZE, CHUNK_OVERLAP, TOP_K
 
 # ── Page config ──────────────────────────────────────────────────────────────
