@@ -233,6 +233,7 @@ with tab1:
                 </div>""", unsafe_allow_html=True)
 
         st.markdown("<br>", unsafe_allow_html=True)
+        render_trial_status(st, st.session_state.chat)
         col_q, col_btn = st.columns([5, 1])
         with col_q:
             question = st.text_input(
