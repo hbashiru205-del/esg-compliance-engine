@@ -259,7 +259,9 @@ with tab1:
                     question = qq
                     ask = True# -- part 5/7 --
         if ask and question.strip():
-            if not api_key:
+            if trial_exceeded(st.session_state.chat):
+                render_trial_blocked(st)
+            elif not api_key:
                 st.error("System configuration issue — please contact support.")
             else:
                 with st.spinner("Retrieving relevant sections and generating answer..."):
