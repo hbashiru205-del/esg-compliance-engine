@@ -12,7 +12,7 @@ real trial abuse to justify the added complexity.
 """
 
 TRIAL_LIMIT = 5
-PILOT_PRICE = "$75"
+PILOT_PRICE = "£75"
 PILOT_TERMS = "one document, 30 days"
 CONTACT_EMAIL = "hello@clarixintel.com"
 
