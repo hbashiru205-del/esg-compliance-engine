@@ -312,4 +312,44 @@ with tab2:
             from tests.accuracy_test import run_accuracy_test
             with st.spinner("Running 5 test questions... this takes ~30 seconds"):
                 results = run_accuracy_test(store, api_key, top_k=TOP_K, registry=registry)
-            st.session_state.test_results = results
+            st.session_state.test_results = results# -- part 6/7 --
+        if st.session_state.test_results:
+            r = st.session_state.test_results
+            c1, c2, c3 = st.columns(3)
+            with c1:
+                st.markdown(f"""<div class="metric-card">
+                    <div class="metric-value">{r['accuracy_pct']}%</div>
+                    <div class="metric-label">Overall Accuracy</div></div>""",
+                    unsafe_allow_html=True)
+            with c2:
+                st.markdown(f"""<div class="metric-card">
+                    <div class="metric-value">{r['passed']}/{r['total']}</div>
+                    <div class="metric-label">Tests Passed</div></div>""",
+                    unsafe_allow_html=True)
+            with c3:
+                cited = sum(1 for x in r["results"] if x["cited"])
+                st.markdown(f"""<div class="metric-card">
+                    <div class="metric-value">{cited}/{r['total']}</div>
+                    <div class="metric-label">Cited Answers</div></div>""",
+                    unsafe_allow_html=True)
+
+            st.markdown("<br>", unsafe_allow_html=True)
+
+            st.markdown("<br>", unsafe_allow_html=True)
+            for res in r["results"]:
+                status_class = {
+                    "PASS":    "status-pass",
+                    "PARTIAL": "status-partial",
+                    "FAIL":    "status-fail",
+                }[res["status"]]
+                with st.expander(f"{res['question']}  —  [{res['status']}]"):
+                    st.markdown(f"**Status:** <span class='{status_class}'>{res['status']}</span>",
+                                unsafe_allow_html=True)
+                    st.markdown(f"**Cited:** {'✅' if res['cited'] else '❌'}  |  "
+                                f"**Chunks retrieved:** {res['n_chunks']}")
+                    st.markdown("**Answer:**")
+                    st.markdown(f"""<div class="answer-box">{res['answer']}</div>""",
+                                unsafe_allow_html=True)
+
+with tab3:
+    st.markdown("### 📖 How the ESG Compliance Engine Works")
