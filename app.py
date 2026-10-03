@@ -261,4 +261,55 @@ with tab1:
             with qcols[i]:
                 if st.button(qq, key=f"qq_{i}"):
                     question = qq
-                    ask = True
+                    ask = True# -- part 5/7 --
+        if ask and question.strip():
+            if trial_exceeded(st.session_state.account_token):
+                render_trial_blocked(st, st.session_state.account_token)
+            elif not api_key:
+                st.error("System configuration issue — please contact support.")
+            else:
+                with st.spinner("Retrieving relevant sections and generating answer..."):
+                    chunks   = store.retrieve(question, top_k=TOP_K)
+                    chunks   = registry.add_identity_context(question, chunks)
+                    response = query_compliance(
+                        question, chunks,
+                        api_key=api_key,
+                        chat_history=st.session_state.chat
+                    )
+
+                st.session_state.chat.append({"role": "user",    "content": question})
+                st.session_state.chat.append({
+                    "role":       "assistant",
+                    "content":    response["answer"],
+                    "answer_only":response["answer"],
+                    "reasoning":  response.get("reasoning", ""),
+                    "citations":  response["sources_used"],
+                    "excerpts":   make_excerpt_records(chunks),
+                })
+                increment_usage(st.session_state.account_token)
+                st.rerun()
+
+        if st.session_state.chat:
+            if st.button("🗑 Clear chat"):
+                st.session_state.chat = []
+                st.rerun()
+            export_buttons(st, st.session_state.chat, registry)
+
+with tab2:
+    st.markdown("### 🧪 System Accuracy Evaluation")
+    st.markdown(
+        "Runs 5 standard compliance questions against your uploaded documents "
+        "and scores each answer for citation quality and relevance."
+    )
+
+    if not st.session_state.docs_loaded:
+        st.info("Upload a document first to run the accuracy test.")
+    elif not api_key:
+        st.warning("System configuration issue — please contact support.")
+    else:
+        if st.button("▶ Run Accuracy Test"):
+            sys.path.insert(0, os.path.join(os.path.dirname(__file__), "tests"))
+            from tests.accuracy_test import run_accuracy_test
+            with st.spinner("Running 5 test questions... this takes ~30 seconds"):
+                results = run_accuracy_test(store, api_key, top_k=TOP_K, registry=registry)
+            st.session_state.test_results = results
