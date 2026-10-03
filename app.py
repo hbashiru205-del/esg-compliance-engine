@@ -158,4 +158,52 @@ with st.sidebar:
         type=["pdf"],
         accept_multiple_files=True,
         label_visibility="collapsed"
-)
+)# -- part 3/7 --
+    if uploaded:
+        new_files = [f.name for f in uploaded if f.name not in st.session_state.docs_loaded]
+        if new_files:
+            with st.spinner("Processing documents..."):
+                for file in uploaded:
+                    if file.name not in st.session_state.docs_loaded:
+                        raw = file.read()
+                        chunks, _ = process_pdf(
+                            raw, file.name,
+                            chunk_size=CHUNK_SIZE,
+                            overlap=CHUNK_OVERLAP
+                        )
+                        registry.add(file.name, raw)
+                        store.add_chunks(chunks)
+                        st.session_state.docs_loaded.append(file.name)
+            st.success(f"✅ {len(new_files)} document(s) indexed")
+
+    if st.session_state.docs_loaded:
+        st.markdown("**Indexed documents:**")
+        for doc in st.session_state.docs_loaded:
+            st.markdown(f"• `{doc}`")
+        st.markdown(f"**Total chunks:** `{store.doc_count}`")
+
+        if st.button("🗑 Clear All Documents"):
+            store.clear()
+            registry.clear()
+            st.session_state.docs_loaded = []
+            st.session_state.chat = []
+            st.rerun()
+
+    st.markdown("---")
+    st.markdown("### 📊 System Stats")
+    col1, col2 = st.columns(2)
+    with col1:
+        st.metric("Chunks", store.doc_count)
+    with col2:
+        st.metric("Docs", len(st.session_state.docs_loaded))
+
+# ── Header ────────────────────────────────────────────────────────────────────
+st.markdown("""
+<div class="header-bar">
+    <h1>⚖️ ESG Compliance Engine</h1>
+    <p>AI-powered regulatory document intelligence — instant, cited, audit-ready answers</p>
+</div>
+""", unsafe_allow_html=True)
+
+# ── Tabs ──────────────────────────────────────────────────────────────────────
+tab1, tab2, tab3 = st.tabs(["💬 Ask Questions", "🧪 Accuracy Test", "📖 How It Works"])
