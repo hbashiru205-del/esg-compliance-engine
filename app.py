@@ -307,7 +307,9 @@ with tab1:
 
 
 with tab2:
-    st.markdown("### 🧩 Regulatory Intelligence")
+        st.markdown("### 🧩 Regulatory Intelligence")
+
+    st.markdown(
         "Turn retrieved regulatory text into structured requirements before using it "
         "for research or evidence-led gap analysis."
     )
