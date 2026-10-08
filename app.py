@@ -95,7 +95,8 @@ st.markdown("""
         border-radius: 10px;
         padding: 10px;
     }
-        #MainMenu, footer { visibility: hidden; }/* -- part 2/7 -- */
+
+    #MainMenu, footer { visibility: hidden; }/* -- part 2/7 -- */
     .stTabs [data-baseweb="tab"] {
         color: #5A6473;
         font-weight: 500;
@@ -390,7 +391,7 @@ with tab2:
                 assessment = item["assessment"]
                 with st.expander(f"{item['id']} · {assessment['status']} · {item['requirement']}"):
                     st.markdown(f"**Assessment**\n\n{assessment['assessment']}")
-                            if assessment["missing_elements"]:
+                    if assessment["missing_elements"]:
                         st.markdown("**Elements not demonstrated**")
                         for missing in assessment["missing_elements"]:
                             st.markdown(f"- {missing}")
@@ -463,7 +464,7 @@ with tab3:
 
 with tab4:
     st.markdown("### 📖 How the ESG Compliance Engine Works")# -- part 7/7 --
-                                    steps = [
+    steps = [
         ("1. Upload", "You upload your regulatory PDF documents (CSRD, AML, GDPR, internal policies, etc.)."),
         ("2. Process", "The engine splits each document into intelligent chunks, preserving sentence boundaries."),
         ("3. Index",   "Each chunk is indexed using TF-IDF scoring — making every section instantly searchable."),
