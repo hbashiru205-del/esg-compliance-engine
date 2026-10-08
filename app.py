@@ -51,7 +51,7 @@ st.markdown("""
         font-size: 13px;
         margin: 4px 0 0 0;
     }
-
+    
     .answer-box {
         background-color: #0F2235;
         border: 1px solid #1B6CA8;
@@ -111,7 +111,6 @@ st.markdown("""
     label { color: #A0B4C8 !important; }
 </style>
 """, unsafe_allow_html=True)
-
 # ── Session state ─────────────────────────────────────────────────────────────
 if "store"       not in st.session_state: st.session_state.store       = VectorStore()
 if "chat"        not in st.session_state: st.session_state.chat        = []
@@ -124,7 +123,7 @@ if "registry"    not in st.session_state: st.session_state.registry    = DocRegi
 # ── Free-trial account (name only -- no email, no password, no access ──────────
 # code needed up front any more). Everyone gets 5 free questions immediately;
 # an access code is only asked for once that trial is used up -- see
-# backend.trial_gate.render_trial_blocked for that flow.
+# backend/trial_gate.render_trial_blocked for that flow.
 # The token lives in the page's own URL so it survives an ordinary refresh;
 # losing that exact link starts a new trial, which is a known, disclosed gap.
 if "account_token" not in st.session_state:
@@ -198,7 +197,7 @@ with st.sidebar:
     with col1:
         st.metric("Chunks", store.doc_count)
     with col2:
-        st.metric("Docs", len(st.session_state.docs_loaded))
+                st.metric("Docs", len(st.session_state.docs_loaded))
 
 # ── Header ────────────────────────────────────────────────────────────────────
 st.markdown("""
@@ -249,7 +248,7 @@ with tab1:
                 label_visibility="collapsed",
                 key="question_input"
             )
-        with col_btn:
+                    with col_btn:
                      ask = st.button("Ask ➤")
 
         st.markdown("<p style='font-size:11px; color:#3A4F63; margin-top:6px'>Quick questions:</p>",
@@ -297,8 +296,7 @@ with tab1:
                 st.session_state.chat = []
                 st.rerun()
             export_buttons(st, st.session_state.chat, registry)
-
-with tab2:
+        with tab2:
     st.markdown("### 🧩 Regulatory Intelligence")
     st.markdown(
         "Turn retrieved regulatory text into structured requirements before using it "
@@ -347,7 +345,7 @@ with tab2:
                         f"{source.get('reference') or 'reference not identified'} · "
                         f"page {source.get('page') or 'unknown'}"
                     )
-
+                    
         st.markdown("---")
         st.markdown("#### Evidence-led gap analysis")
         st.caption(
@@ -398,7 +396,7 @@ with tab2:
                     if assessment["evidence"]:
                         st.markdown("**Evidence used**")
                         for ev in assessment["evidence"]:
-                            st.markdown(
+                                                        st.markdown(
                                 f"- **{ev.get('filename', 'Unknown')}** · "
                                 f"{ev.get('reference') or 'reference not identified'} · "
                                 f"page {ev.get('page') or 'unknown'}"
@@ -443,7 +441,7 @@ with tab2:
                     <div class="metric-value">{cited}/{r['total']}</div>
                     <div class="metric-label">Cited Answers</div></div>""",
                     unsafe_allow_html=True)
-
+                
             st.markdown("<br>", unsafe_allow_html=True)
 
             st.markdown("<br>", unsafe_allow_html=True)
@@ -458,4 +456,35 @@ with tab2:
                                 unsafe_allow_html=True)
                     st.markdown(f"**Cited:** {'✅' if res['cited'] else '❌'}  |  "
                                 f"**Chunks retrieved:** {res['n_chunks']}")
-                    st.markdown(
+                    st.markdown("**Answer:**")
+                    st.markdown(f"""<div class="answer-box">{res['answer']}</div>""",
+                                unsafe_allow_html=True)
+
+with tab4:
+    st.markdown("### 📖 How the ESG Compliance Engine Works")# -- part 7/7 --
+    steps = [
+        ("1. Upload", "You upload your regulatory PDF documents (CSRD, AML, GDPR, internal policies, etc.)."),
+        ("2. Process", "The engine splits each document into intelligent chunks, preserving sentence boundaries."),
+        ("3. Index",   "Each chunk is indexed using TF-IDF scoring — making every section instantly searchable."),
+        ("4. Retrieve","When you ask a question, the system finds the most relevant sections from your documents."),
+        ("5. Generate","Gemini reads only those sections and generates a precise, cited answer."),
+        ("6. Cite",    "Every answer includes exact source references — making it fully audit-ready."),
+    ]
+    for title, desc in steps:
+        st.markdown(f"""
+        <div style='background:#0F2235; border:1px solid #1B3A5C; border-radius:10px;
+        padding:14px 20px; margin:8px 0;'>
+            <b style='color:#2D9CDB'>{title}</b>
+            <p style='color:#A0B4C8; margin:4px 0 0 0; font-size:13px;'>{desc}</p>
+        </div>""", unsafe_allow_html=True)
+
+    st.markdown("### 🔒 Data Privacy")
+    st.markdown("""
+    <div style='background:#0A1F0A; border:1px solid #27AE60; border-radius:10px; padding:16px 20px;'>
+        <p style='color:#A8D5A2; margin:0; font-size:13px;'>
+        ✅ Your documents themselves are processed <b>in-session only</b> and never stored.<br>
+        ℹ️ Your trial account stores only your name and a count of questions asked -- nothing else, and no document content.<br>
+        ℹ️ Trial sessions currently run on shared processing infrastructure suited to public and general regulatory documents. Pilot clients are moved to a dedicated, paid processing tier.
+        </p>
+    </div>""", unsafe_allow_html=True)
+    
