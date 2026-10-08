@@ -724,4 +724,418 @@ with tab1:
                                 """,
                                 unsafe_allow_html=True,
         )
+                                    st.markdown("<br>", unsafe_allow_html=True)
+
+        render_trial_status(
+            st,
+            st.session_state.account_token,
+        )
+
+        col_q, col_btn = st.columns([5, 1])
+
+        with col_q:
+
+            question = st.text_input(
+                "Ask a compliance question",
+                placeholder=(
+                    "e.g. What are the Scope 3 emissions "
+                    "disclosure requirements?"
+                ),
+                label_visibility="collapsed",
+                key="question_input",
+            )
+
+        with col_btn:
+
+            ask = st.button("Ask ➤")
+
+        st.markdown(
+            """
+            <p style="
+                font-size:11px;
+                color:#3A4F63;
+                margin-top:6px;
+            ">
+                Quick questions:
+            </p>
+            """,
+            unsafe_allow_html=True,
+        )
+
+        qcols = st.columns(3)
+
+        quick_qs = [
+            "What are the main disclosure requirements?",
+            "What penalties apply for non-compliance?",
+            "Who is responsible for compliance oversight?",
+        ]
+
+        for i, qq in enumerate(quick_qs):
+
+            with qcols[i]:
+
+                if st.button(
+                    qq,
+                    key=f"qq_{i}",
+                ):
+
+                    question = qq
+                    ask = True        if ask and question.strip():
+
+            if trial_exceeded(
+                st.session_state.account_token
+            ):
+
+                render_trial_blocked(
+                    st,
+                    st.session_state.account_token,
+                )
+
+            elif not api_key:
+
+                st.error(
+                    "System configuration issue — "
+                    "please contact support."
+                )
+
+            else:
+
+                with st.spinner(
+                    "Analysing regulatory requirements..."
+                ):
+
+                    chunks = store.retrieve(
+                        question,
+                        top_k=TOP_K,
+                    )
+
+                    chunks = registry.add_identity_context(
+                        question,
+                        chunks,
+                    )
+
+                    response = query_compliance(
+                        question,
+                        chunks,
+                        api_key=api_key,
+                        chat_history=st.session_state.chat,
+                    )
+
+                st.session_state.chat.append(
+                    {
+                        "role": "user",
+                        "content": question,
+                    }
+                )
+
+                st.session_state.chat.append(
+                    {
+                        "role": "assistant",
+                        "content": response["answer"],
+                        "answer_only": response["answer"],
+                        "reasoning": "",
+                        "citations": response.get(
+                            "sources_used",
+                            [],
+                        ),
+                        "requirements": response.get(
+                            "requirements",
+                            [],
+                        ),
+                        "excerpts": make_excerpt_records(
+                            chunks
+                        ),
+                    }
+                )
+
+                increment_usage(
+                    st.session_state.account_token
+                )
+
+                st.rerun()
+
+        if st.session_state.chat:
+
+            if st.button("🗑 Clear chat"):
+
+                st.session_state.chat = []
+
+                st.rerun()
+
+            export_buttons(
+                st,
+                st.session_state.chat,
+                registry,
+            )
+
+# ─────────────────────────────────────────────────────────────────────────────
+# TAB 2 — ACCURACY TEST
+# ─────────────────────────────────────────────────────────────────────────────
+
+with tab2:
+
+    st.markdown(
+        "### 🧪 System Accuracy Evaluation"
+    )
+
+    st.markdown(
+        "Runs 5 standard compliance questions against your "
+        "uploaded documents and scores each answer for citation "
+        "quality and relevance."
+    )
+
+    if not st.session_state.docs_loaded:
+
+        st.info(
+            "Upload a document first to run the accuracy test."
+        )
+
+    elif not api_key:
+
+        st.warning(
+            "System configuration issue — please contact support."
+        )
+
+    else:
+
+        if st.button("▶ Run Accuracy Test"):
+
+            sys.path.insert(
+                0,
+                os.path.join(
+                    os.path.dirname(__file__),
+                    "tests",
+                ),
+            )
+
+            from tests.accuracy_test import run_accuracy_test
+
+            with st.spinner(
+                "Running 5 accuracy questions..."
+            ):
+
+                results = run_accuracy_test(
+                    store,
+                    api_key,
+                    top_k=TOP_K,
+                    registry=registry,
+                )
+
+            st.session_state.test_results = results
+
+        if st.session_state.test_results:
+
+            r = st.session_state.test_results
+
+            c1, c2, c3 = st.columns(3)
+
+            with c1:
+
+                st.markdown(
+                    f"""
+                    <div class="metric-card">
+
+                        <div class="metric-value">
+                            {r['accuracy_pct']}%
+                        </div>
+
+                        <div class="metric-label">
+                            Overall Accuracy
+                        </div>
+
+                    </div>
+                    """,
+                    unsafe_allow_html=True,
+                )
+
+            with c2:
+
+                st.markdown(
+                    f"""
+                    <div class="metric-card">
+
+                        <div class="metric-value">
+                            {r['passed']}/{r['total']}
+                        </div>
+
+                        <div class="metric-label">
+                            Tests Passed
+                        </div>
+
+                    </div>
+                    """,
+                    unsafe_allow_html=True,
+                )
+
+            with c3:
+
+                cited = sum(
+                    1
+                    for x in r["results"]
+                    if x["cited"]
+                )
+
+                st.markdown(
+                    f"""
+                    <div class="metric-card">
+
+                        <div class="metric-value">
+                            {cited}/{r['total']}
+                        </div>
+
+                        <div class="metric-label">
+                            Cited Answers
+                        </div>
+
+                    </div>
+                    """,
+                    unsafe_allow_html=True,
+                )
+
+            st.markdown("<br>", unsafe_allow_html=True)
+
+            for res in r["results"]:
+
+                with st.expander(
+                    f"{res['question']} — [{res['status']}]"
+                ):
+
+                    st.markdown(
+                        f"**Status:** {res['status']}"
+                    )
+
+                    st.markdown(
+                        f"**Cited:** "
+                        f"{'✅' if res['cited'] else '❌'}"
+                        f" | **Chunks retrieved:** "
+                        f"{res['n_chunks']}"
+                    )
+
+                    st.markdown("**Answer:**")
+
+                    st.markdown(
+                        f"""
+                        <div class="answer-box">
+                            {res['answer']}
+                        </div>
+                        """,
+                        unsafe_allow_html=True,
+                    )
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# TAB 3 — HOW IT WORKS
+# ─────────────────────────────────────────────────────────────────────────────
+
+with tab3:
+
+    st.markdown(
+        "### 📖 How ClariX Intelligence Works"
+    )
+
+    steps = [
+
+        (
+            "1. Upload",
+            "Upload regulatory documents such as CSRD, AML, "
+            "GDPR, sustainability standards or internal policies.",
+        ),
+
+        (
+            "2. Process",
+            "ClariX extracts the document text while preserving "
+            "page and regulatory reference information.",
+        ),
+
+        (
+            "3. Retrieve",
+            "When you ask a question, ClariX finds relevant "
+            "sections from the uploaded documents.",
+        ),
+
+        (
+            "4. Understand",
+            "ClariX structures relevant regulatory requirements "
+            "into subjects, actions, conditions, exceptions, "
+            "scope and cross-references.",
+        ),
+
+        (
+            "5. Answer",
+            "Gemini produces an answer using only the "
+            "retrieved regulatory evidence.",
+        ),
+
+        (
+            "6. Trace",
+            "The answer and structured requirement remain "
+            "connected to the original document source.",
+        ),
+    ]
+
+    for title, desc in steps:
+
+        st.markdown(
+            f"""
+            <div style="
+                background:#0F2235;
+                border:1px solid #1B3A5C;
+                border-radius:10px;
+                padding:14px 20px;
+                margin:8px 0;
+            ">
+
+                <b style="color:#2D9CDB">
+                    {title}
+                </b>
+
+                <p style="
+                    color:#A0B4C8;
+                    margin:4px 0 0 0;
+                    font-size:13px;
+                ">
+                    {desc}
+                </p>
+
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
+    st.markdown(
+        "### 🔒 Data Privacy"
+    )
+
+    st.markdown(
+        """
+        <div style="
+            background:#0A1F0A;
+            border:1px solid #27AE60;
+            border-radius:10px;
+            padding:16px 20px;
+        ">
+
+            <p style="
+                color:#A8D5A2;
+                margin:0;
+                font-size:13px;
+            ">
+
+            ✅ Your documents themselves are processed
+            <b>in-session only</b> and never stored.<br>
+
+            ℹ️ Your trial account stores only your name
+            and a count of questions asked — nothing else,
+            and no document content.<br>
+
+            ℹ️ Trial sessions currently run on shared
+            processing infrastructure suited to public and
+            general regulatory documents.
+
+            </p>
+
+        </div>
+        """,
+        unsafe_allow_html=True,
+                )
                                                    
