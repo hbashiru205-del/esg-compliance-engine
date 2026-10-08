@@ -11,6 +11,7 @@ requirement rather than exposing or storing hidden chain-of-thought.
 
 import json
 import re
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any
 
 from google import genai
@@ -124,7 +125,7 @@ EXCERPTS:
             model=MODEL,
             contents=[types.Content(role="user", parts=[types.Part(text=prompt)])],
             config=types.GenerateContentConfig(
-                max_output_tokens=MAX_TOKENS,
+                max_output_tokens=min(MAX_TOKENS, 1400),
                 response_mime_type="application/json",
             ),
         )
@@ -227,7 +228,7 @@ CLIENT EVIDENCE:
             model=MODEL,
             contents=[types.Content(role="user", parts=[types.Part(text=prompt)])],
             config=types.GenerateContentConfig(
-                max_output_tokens=MAX_TOKENS,
+                max_output_tokens=min(MAX_TOKENS, 1000),
                 response_mime_type="application/json",
             ),
         )
@@ -255,9 +256,18 @@ def run_gap_analysis(
     client_store,
     api_key: str | None = None,
     evidence_top_k: int = 4,
+    max_workers: int = 4,
 ) -> list[dict]:
-    """Match structured requirements to client evidence and assess each one."""
-    results = []
+    """Match requirements to evidence and assess them concurrently.
+
+    Evidence retrieval is local and cheap, while each assessment is a separate
+    Gemini request. Running those requests concurrently cuts total wall-clock
+    time substantially without changing the assessment logic or UI output.
+    """
+    if not requirements:
+        return []
+
+    prepared = []
     for requirement in requirements:
         query = " ".join([
             requirement.get("requirement", ""),
@@ -266,11 +276,31 @@ def run_gap_analysis(
             requirement.get("object", ""),
             " ".join(requirement.get("conditions", [])),
         ]).strip()
-
         evidence = client_store.retrieve(query, top_k=evidence_top_k) if query else []
-        assessment = assess_requirement(requirement, evidence, api_key=api_key)
-        results.append({
-            **requirement,
-            "assessment": assessment,
-        })
-    return results
+        prepared.append((requirement, evidence))
+
+    worker_count = max(1, min(max_workers, len(prepared)))
+    assessments = [None] * len(prepared)
+
+    with ThreadPoolExecutor(max_workers=worker_count) as executor:
+        futures = {
+            executor.submit(assess_requirement, requirement, evidence, api_key): i
+            for i, (requirement, evidence) in enumerate(prepared)
+        }
+        for future in as_completed(futures):
+            index = futures[future]
+            requirement, evidence = prepared[index]
+            try:
+                assessments[index] = future.result()
+            except Exception:
+                assessments[index] = assess_requirement(requirement, evidence, api_key=api_key)
+
+    return [
+        {**requirement, "assessment": assessments[i] or {
+            "status": "Potential gap",
+            "assessment": "No reliable assessment was returned.",
+            "evidence": [],
+            "missing_elements": [],
+        }}
+        for i, (requirement, _evidence) in enumerate(prepared)
+    ]
