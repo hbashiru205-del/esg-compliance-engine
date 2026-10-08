@@ -694,6 +694,7 @@ with tab1:
         qcols = st.columns(3)
 
         quick_qs = [
-            "What are the main disclosure requirements?",
-            "What penalties apply for non-compliance?",
-            "Who is respons
+    "What are the main disclosure requirements?",
+    "What penalties apply for non-compliance?",
+    "Who is responsible for compliance oversight?",
+        ]
