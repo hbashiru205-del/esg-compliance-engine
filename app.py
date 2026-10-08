@@ -248,8 +248,8 @@ with tab1:
                 label_visibility="collapsed",
                 key="question_input"
             )
-                    with col_btn:
-                     ask = st.button("Ask ➤")
+              with col_btn:
+                  ask = st.button("Ask ➤") 
 
         st.markdown("<p style='font-size:11px; color:#3A4F63; margin-top:6px'>Quick questions:</p>",
                     unsafe_allow_html=True)
