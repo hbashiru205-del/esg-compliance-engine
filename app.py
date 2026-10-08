@@ -51,7 +51,7 @@ st.markdown("""
         font-size: 13px;
         margin: 4px 0 0 0;
     }
-    
+
     .answer-box {
         background-color: #0F2235;
         border: 1px solid #1B6CA8;
@@ -95,8 +95,7 @@ st.markdown("""
         border-radius: 10px;
         padding: 10px;
     }
-
-    #MainMenu, footer { visibility: hidden; }/* -- part 2/7 -- */
+        #MainMenu, footer { visibility: hidden; }/* -- part 2/7 -- */
     .stTabs [data-baseweb="tab"] {
         color: #5A6473;
         font-weight: 500;
@@ -111,6 +110,7 @@ st.markdown("""
     label { color: #A0B4C8 !important; }
 </style>
 """, unsafe_allow_html=True)
+
 # ── Session state ─────────────────────────────────────────────────────────────
 if "store"       not in st.session_state: st.session_state.store       = VectorStore()
 if "chat"        not in st.session_state: st.session_state.chat        = []
@@ -197,7 +197,7 @@ with st.sidebar:
     with col1:
         st.metric("Chunks", store.doc_count)
     with col2:
-                st.metric("Docs", len(st.session_state.docs_loaded))
+        st.metric("Docs", len(st.session_state.docs_loaded))
 
 # ── Header ────────────────────────────────────────────────────────────────────
 st.markdown("""
@@ -241,36 +241,29 @@ with tab1:
         st.markdown("<br>", unsafe_allow_html=True)
         render_trial_status(st, st.session_state.account_token)
         col_q, col_btn = st.columns([5, 1])
-
         with col_q:
             question = st.text_input(
                 "Ask a compliance question",
                 placeholder="e.g. What are the Scope 3 emissions disclosure requirements?",
                 label_visibility="collapsed",
-                key="question_input",
+                key="question_input"
             )
-
         with col_btn:
             ask = st.button("Ask ➤")
 
-        st.markdown(
-            "<p style='font-size:11px; color:#3A4F63; margin-top:6px'>Quick questions:</p>",
-            unsafe_allow_html=True,
-        )
-
+        st.markdown("<p style='font-size:11px; color:#3A4F63; margin-top:6px'>Quick questions:</p>",
+                    unsafe_allow_html=True)
         qcols = st.columns(3)
-
         quick_qs = [
             "What are the main disclosure requirements?",
             "What penalties apply for non-compliance?",
             "Who is responsible for compliance oversight?",
         ]
-
         for i, qq in enumerate(quick_qs):
             with qcols[i]:
                 if st.button(qq, key=f"qq_{i}"):
                     question = qq
-                    ask = True
+                    ask = True# -- part 5/7 --
         if ask and question.strip():
             if trial_exceeded(st.session_state.account_token):
                 render_trial_blocked(st, st.session_state.account_token)
@@ -298,16 +291,14 @@ with tab1:
                 increment_usage(st.session_state.account_token)
                 st.rerun()
 
-                if st.session_state.chat and st.button("🗑 Clear chat"):
-        st.session_state.chat = []
-        st.rerun()
-
-    export_buttons(st, st.session_state.chat, registry)
-
+        if st.session_state.chat:
+            if st.button("🗑 Clear chat"):
+                st.session_state.chat = []
+                st.rerun()
+            export_buttons(st, st.session_state.chat, registry)
 
 with tab2:
-        st.markdown("### 🧩 Regulatory Intelligence")
-
+    st.markdown("### 🧩 Regulatory Intelligence")
     st.markdown(
         "Turn retrieved regulatory text into structured requirements before using it "
         "for research or evidence-led gap analysis."
@@ -355,7 +346,7 @@ with tab2:
                         f"{source.get('reference') or 'reference not identified'} · "
                         f"page {source.get('page') or 'unknown'}"
                     )
-                    
+
         st.markdown("---")
         st.markdown("#### Evidence-led gap analysis")
         st.caption(
@@ -399,14 +390,14 @@ with tab2:
                 assessment = item["assessment"]
                 with st.expander(f"{item['id']} · {assessment['status']} · {item['requirement']}"):
                     st.markdown(f"**Assessment**\n\n{assessment['assessment']}")
-                    if assessment["missing_elements"]:
+                            if assessment["missing_elements"]:
                         st.markdown("**Elements not demonstrated**")
                         for missing in assessment["missing_elements"]:
                             st.markdown(f"- {missing}")
                     if assessment["evidence"]:
                         st.markdown("**Evidence used**")
                         for ev in assessment["evidence"]:
-                                                        st.markdown(
+                            st.markdown(
                                 f"- **{ev.get('filename', 'Unknown')}** · "
                                 f"{ev.get('reference') or 'reference not identified'} · "
                                 f"page {ev.get('page') or 'unknown'}"
@@ -414,7 +405,7 @@ with tab2:
                             if ev.get("quote"):
                                 st.caption(ev["quote"])
 
-with tab2:
+with tab3:
     st.markdown("### 🧪 System Accuracy Evaluation")
     st.markdown(
         "Runs 5 standard compliance questions against your uploaded documents "
@@ -451,7 +442,7 @@ with tab2:
                     <div class="metric-value">{cited}/{r['total']}</div>
                     <div class="metric-label">Cited Answers</div></div>""",
                     unsafe_allow_html=True)
-                
+
             st.markdown("<br>", unsafe_allow_html=True)
 
             st.markdown("<br>", unsafe_allow_html=True)
@@ -472,7 +463,7 @@ with tab2:
 
 with tab4:
     st.markdown("### 📖 How the ESG Compliance Engine Works")# -- part 7/7 --
-    steps = [
+                                    steps = [
         ("1. Upload", "You upload your regulatory PDF documents (CSRD, AML, GDPR, internal policies, etc.)."),
         ("2. Process", "The engine splits each document into intelligent chunks, preserving sentence boundaries."),
         ("3. Index",   "Each chunk is indexed using TF-IDF scoring — making every section instantly searchable."),
@@ -497,4 +488,3 @@ with tab4:
         ℹ️ Trial sessions currently run on shared processing infrastructure suited to public and general regulatory documents. Pilot clients are moved to a dedicated, paid processing tier.
         </p>
     </div>""", unsafe_allow_html=True)
-    
