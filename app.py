@@ -302,10 +302,10 @@ with tab1:
             if st.button("🗑 Clear chat"):
                 st.session_state.chat = []
                 st.rerun()
-            export_buttons(st, st.session_state.chat, registry)
-        with tab2:
-    st.markdown("### 🧩 Regulatory Intelligence")
-    st.markdown(
+                    export_buttons(st, st.session_state.chat, registry)
+
+    with tab2:
+        st.markdown("### 🧩 Regulatory Intelligence")
         "Turn retrieved regulatory text into structured requirements before using it "
         "for research or evidence-led gap analysis."
     )
