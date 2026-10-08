@@ -298,12 +298,14 @@ with tab1:
                 increment_usage(st.session_state.account_token)
                 st.rerun()
 
-            if st.session_state.chat:
-        if st.button("🗑 Clear chat"):
-            st.session_state.chat = []
-            st.rerun()
+                if st.session_state.chat:
+                   if st.button("🗑 Clear 
+               chat"):
+                      st.session_state.chat = []
+                      st.rerun()
 
-    export_buttons(st, st.session_state.chat, registry)
+                     export_buttons(st,
+                   st.session_state.chat, registry)
 
 
 with tab2:
