@@ -44,7 +44,14 @@ def extract_text_from_pdf(file_bytes: bytes) -> str:
     pages = []
     with pdfplumber.open(io.BytesIO(file_bytes)) as pdf:
         for i, page in enumerate(pdf.pages):
-            text = page.extract_text() or ""
+            try:
+                text = page.extract_text() or ""
+            finally:
+                # pdfplumber caches every parsed page; without this a
+                # large PDF can use gigabytes of RAM and crash the host.
+                page.flush_cache()
+                if hasattr(page, "close"):
+                    page.close()
             if text.strip():
                 pages.append(f"[Page {i+1}]\n{text.strip()}")
     return "\n\n".join(pages)
