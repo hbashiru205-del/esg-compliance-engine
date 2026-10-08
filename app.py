@@ -240,7 +240,7 @@ with tab1:
 
         st.markdown("<br>", unsafe_allow_html=True)
         render_trial_status(st, st.session_state.account_token)
-                        col_q, col_btn = st.columns([5, 1])   
+        col_q, col_btn = st.columns([5, 1])
 
         with col_q:
             question = st.text_input(
