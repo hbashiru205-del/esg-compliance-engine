@@ -45,150 +45,148 @@ st.set_page_config(
 st.markdown(
     """
 <style>
+    .main {
+        background-color: #0D1B2A;
+    }
 
-.main {
-    background-color: #0D1B2A;
-}
+    .stApp {
+        background-color: #0D1B2A;
+    }
 
-.stApp {
-    background-color: #0D1B2A;
-}
+    [data-testid="stSidebar"] {
+        background-color: #0A1520;
+        border-right: 1px solid #1B3A5C;
+    }
 
-[data-testid="stSidebar"] {
-    background-color: #0A1520;
-    border-right: 1px solid #1B3A5C;
-}
+    .header-bar {
+        background: linear-gradient(135deg, #1B6CA8, #0D4F82);
+        padding: 20px 28px;
+        border-radius: 12px;
+        margin-bottom: 24px;
+    }
 
-.header-bar {
-    background: linear-gradient(135deg, #1B6CA8, #0D4F82);
-    padding: 20px 28px;
-    border-radius: 12px;
-    margin-bottom: 24px;
-}
+    .header-bar h1 {
+        color: white;
+        font-size: 26px;
+        font-weight: 700;
+        margin: 0;
+        letter-spacing: 0.5px;
+    }
 
-.header-bar h1 {
-    color: white;
-    font-size: 26px;
-    font-weight: 700;
-    margin: 0;
-    letter-spacing: 0.5px;
-}
+    .header-bar p {
+        color: #BDD5EA;
+        font-size: 13px;
+        margin: 4px 0 0 0;
+    }
 
-.header-bar p {
-    color: #BDD5EA;
-    font-size: 13px;
-    margin: 4px 0 0 0;
-}
+    .answer-box {
+        background-color: #0F2235;
+        border: 1px solid #1B6CA8;
+        border-left: 4px solid #2D9CDB;
+        border-radius: 10px;
+        padding: 20px 24px;
+        margin: 12px 0;
+        color: #E8F1FA;
+        font-size: 14px;
+        line-height: 1.7;
+    }
 
-.answer-box {
-    background-color: #0F2235;
-    border: 1px solid #1B6CA8;
-    border-left: 4px solid #2D9CDB;
-    border-radius: 10px;
-    padding: 20px 24px;
-    margin: 12px 0;
-    color: #E8F1FA;
-    font-size: 14px;
-    line-height: 1.7;
-}
+    .requirement-card {
+        background-color: #0F2235;
+        border: 1px solid #1B3A5C;
+        border-left: 4px solid #27AE60;
+        border-radius: 10px;
+        padding: 16px 18px;
+        margin: 10px 0;
+    }
 
-.requirement-card {
-    background-color: #0F2235;
-    border: 1px solid #1B3A5C;
-    border-left: 4px solid #27AE60;
-    border-radius: 10px;
-    padding: 16px 18px;
-    margin: 10px 0;
-}
+    .requirement-title {
+        color: #E8F1FA;
+        font-size: 15px;
+        font-weight: 600;
+        margin-bottom: 12px;
+    }
 
-.requirement-title {
-    color: #E8F1FA;
-    font-size: 15px;
-    font-weight: 600;
-    margin-bottom: 10px;
-}
+    .requirement-label {
+        color: #5A6473;
+        font-size: 10px;
+        text-transform: uppercase;
+        letter-spacing: 0.7px;
+        font-weight: 700;
+    }
 
-.requirement-label {
-    color: #5A6473;
-    font-size: 10px;
-    text-transform: uppercase;
-    letter-spacing: 0.7px;
-    font-weight: 700;
-}
+    .requirement-value {
+        color: #A0B4C8;
+        font-size: 13px;
+        margin-top: 3px;
+    }
 
-.requirement-value {
-    color: #A0B4C8;
-    font-size: 13px;
-    margin-top: 3px;
-}
+    .citation-badge {
+        display: inline-block;
+        background-color: #1B3A5C;
+        color: #2D9CDB;
+        padding: 3px 10px;
+        border-radius: 20px;
+        font-size: 11px;
+        margin: 3px 3px 3px 0;
+        border: 1px solid #2D4A6A;
+    }
 
-.citation-badge {
-    display: inline-block;
-    background-color: #1B3A5C;
-    color: #2D9CDB;
-    padding: 3px 10px;
-    border-radius: 20px;
-    font-size: 11px;
-    margin: 3px 3px 3px 0;
-    border: 1px solid #2D4A6A;
-}
+    .metric-card {
+        background-color: #0F2235;
+        border: 1px solid #1B3A5C;
+        border-radius: 10px;
+        padding: 14px 18px;
+        text-align: center;
+    }
 
-.metric-card {
-    background-color: #0F2235;
-    border: 1px solid #1B3A5C;
-    border-radius: 10px;
-    padding: 14px 18px;
-    text-align: center;
-}
+    .metric-value {
+        font-size: 28px;
+        font-weight: 700;
+        color: #2D9CDB;
+    }
 
-.metric-value {
-    font-size: 28px;
-    font-weight: 700;
-    color: #2D9CDB;
-}
+    .stButton > button:hover {
+        opacity: 0.88;
+    }
 
-.stButton > button:hover {
-    opacity: 0.88;
-}
+    [data-testid="stFileUploader"] {
+        background-color: #0F2235;
+        border: 1px dashed #1B6CA8;
+        border-radius: 10px;
+        padding: 10px;
+    }
 
-[data-testid="stFileUploader"] {
-    background-color: #0F2235;
-    border: 1px dashed #1B6CA8;
-    border-radius: 10px;
-    padding: 10px;
-}
+    #MainMenu,
+    footer {
+        visibility: hidden;
+    }
 
-#MainMenu,
-footer {
-    visibility: hidden;
-}
+    .stTabs [data-baseweb="tab"] {
+        color: #5A6473;
+        font-weight: 500;
+    }
 
-.stTabs [data-baseweb="tab"] {
-    color: #5A6473;
-    font-weight: 500;
-}
+    .stTabs [aria-selected="true"] {
+        color: #2D9CDB !important;
+        border-bottom-color: #2D9CDB !important;
+    }
 
-.stTabs [aria-selected="true"] {
-    color: #2D9CDB !important;
-    border-bottom-color: #2D9CDB !important;
-}
+    h1,
+    h2,
+    h3,
+    h4 {
+        color: #E8F1FA;
+    }
 
-h1,
-h2,
-h3,
-h4 {
-    color: #E8F1FA;
-}
+    p,
+    li {
+        color: #A0B4C8;
+    }
 
-p,
-li {
-    color: #A0B4C8;
-}
-
-label {
-    color: #A0B4C8 !important;
-}
-
+    label {
+        color: #A0B4C8 !important;
+    }
 </style>
 """,
     unsafe_allow_html=True,
@@ -309,7 +307,10 @@ with st.sidebar:
                             overlap=CHUNK_OVERLAP,
                         )
 
-                        registry.add(file.name, raw)
+                        registry.add(
+                            file.name,
+                            raw,
+                        )
 
                         store.add_chunks(chunks)
 
@@ -326,10 +327,7 @@ with st.sidebar:
         st.markdown("**Indexed documents:**")
 
         for doc in st.session_state.docs_loaded:
-
-            st.markdown(
-                f"• `{doc}`"
-            )
+            st.markdown(f"• `{doc}`")
 
         st.markdown(
             f"**Total chunks:** `{store.doc_count}`"
@@ -338,11 +336,9 @@ with st.sidebar:
         if st.button("🗑 Clear All Documents"):
 
             store.clear()
-
             registry.clear()
 
             st.session_state.docs_loaded = []
-
             st.session_state.chat = []
 
             st.rerun()
@@ -379,7 +375,7 @@ st.markdown(
     <p>
         Evidence-led regulatory intelligence —
         understand requirements, find supporting evidence,
-        and trace every answer to its source.
+        and trace answers to their source.
     </p>
 
 </div>
@@ -421,15 +417,17 @@ with tab1:
 
                 st.markdown(
                     f"""
-                    <div style='text-align:right; margin:8px 0'>
-                        <span style='background:#1B3A5C;
-                        color:#E8F1FA;
-                        padding:10px 16px;
-                        border-radius:18px 18px 4px 18px;
-                        display:inline-block;
-                        max-width:80%;
-                        font-size:14px;'>
-                        {html.escape(turn["content"])}
+                    <div style="text-align:right; margin:8px 0">
+                        <span style="
+                            background:#1B3A5C;
+                            color:#E8F1FA;
+                            padding:10px 16px;
+                            border-radius:18px 18px 4px 18px;
+                            display:inline-block;
+                            max-width:80%;
+                            font-size:14px;
+                        ">
+                            {html.escape(turn["content"])}
                         </span>
                     </div>
                     """,
@@ -456,7 +454,9 @@ with tab1:
                 )
 
                 badge_html = "".join(
-                    f'<span class="citation-badge">{html.escape(c)}</span>'
+                    f'<span class="citation-badge">'
+                    f'{html.escape(str(c))}'
+                    f'</span>'
                     for c in citations
                 )
 
@@ -466,11 +466,13 @@ with tab1:
                         {answer}
 
                         {
-                            '<br><br><b style="color:#5A6473;font-size:11px;">'
-                            'CITED SOURCES:</b><br>'
+                            '<br><br>'
+                            '<b style="color:#5A6473;font-size:11px;">'
+                            'CITED SOURCES:'
+                            '</b><br>'
                             + badge_html
                             if citations
-                            else ''
+                            else ""
                         }
                     </div>
                     """,
@@ -478,7 +480,7 @@ with tab1:
                 )
 
                 # ─────────────────────────────────────────────────────
-                # STRUCTURED REGULATORY REQUIREMENTS
+                # STRUCTURED REQUIREMENTS
                 # ─────────────────────────────────────────────────────
 
                 if requirements:
@@ -490,12 +492,16 @@ with tab1:
 
                         st.markdown(
                             """
-                            <p style="font-size:12px;color:#7F93A8;">
-                            ClariX has broken the relevant regulatory text
-                            into structured requirement elements. This helps
-                            identify what must be done, who it applies to,
-                            relevant conditions, exceptions and
-                            cross-references.
+                            <p style="
+                                font-size:12px;
+                                color:#7F93A8;
+                            ">
+                                ClariX has structured the relevant
+                                regulatory text into requirement
+                                elements. These include who the
+                                requirement applies to, what action
+                                is required, conditions, exceptions,
+                                and cross-references.
                             </p>
                             """,
                             unsafe_allow_html=True,
@@ -503,15 +509,76 @@ with tab1:
 
                         for requirement in requirements:
 
+                            source = requirement.get(
+                                "source",
+                                {},
+                            )
+
+                            conditions = requirement.get(
+                                "conditions",
+                                [],
+                            )
+
+                            exceptions = requirement.get(
+                                "exceptions",
+                                [],
+                            )
+
+                            cross_references = requirement.get(
+                                "cross_references",
+                                [],
+                            )
+
+                            if not isinstance(
+                                conditions,
+                                list,
+                            ):
+                                conditions = []
+
+                            if not isinstance(
+                                exceptions,
+                                list,
+                            ):
+                                exceptions = []
+
+                            if not isinstance(
+                                cross_references,
+                                list,
+                            ):
+                                cross_references = []
+
+                            source_text = str(
+                                source.get(
+                                    "filename",
+                                    "Unknown",
+                                )
+                            )
+
+                            if source.get("page"):
+                                source_text += (
+                                    f" · Page "
+                                    f"{source['page']}"
+                                )
+
+                            if source.get(
+                                "reference"
+                            ):
+                                source_text += (
+                                    f" · "
+                                    f"{source['reference']}"
+                                )
+
                             st.markdown(
                                 f"""
                                 <div class="requirement-card">
 
                                     <div class="requirement-title">
                                         {html.escape(
-                                            requirement.get(
-                                                "requirement",
-                                                ""
+                                            str(
+                                                requirement.get(
+                                                    "requirement",
+                                                    ""
+                                                )
                                             )
                                         )}
                                     </div>
@@ -522,11 +589,14 @@ with tab1:
 
                                     <div class="requirement-value">
                                         {html.escape(
-                                            requirement.get(
-                                                "subject",
-                                                ""
+                                            str(
+                                                requirement.get(
+                                                    "subject",
+                                                    ""
+                                                )
+                                                or
+                                                "Not explicitly identified"
                                             )
-                                            or "Not explicitly identified"
                                         )}
                                     </div>
 
@@ -538,11 +608,33 @@ with tab1:
 
                                     <div class="requirement-value">
                                         {html.escape(
-                                            requirement.get(
-                                                "action",
-                                                ""
+                                            str(
+                                                requirement.get(
+                                                    "action",
+                                                    ""
+                                                )
+                                                or
+                                                "Not explicitly identified"
                                             )
-                                            or "Not explicitly identified"
+                                        )}
+                                    </div>
+
+                                    <br>
+
+                                    <div class="requirement-label">
+                                        Object
+                                    </div>
+
+                                    <div class="requirement-value">
+                                        {html.escape(
+                                            str(
+                                                requirement.get(
+                                                    "object",
+                                                    ""
+                                                )
+                                                or
+                                                "Not explicitly identified"
+                                            )
                                         )}
                                     </div>
 
@@ -555,12 +647,11 @@ with tab1:
                                     <div class="requirement-value">
                                         {html.escape(
                                             ", ".join(
-                                                requirement.get(
-                                                    "conditions",
-                                                    []
-                                                )
+                                                str(x)
+                                                for x in conditions
                                             )
-                                            or "None identified in retrieved text"
+                                            or
+                                            "None identified in retrieved text"
                                         )}
                                     </div>
 
@@ -573,128 +664,22 @@ with tab1:
                                     <div class="requirement-value">
                                         {html.escape(
                                             ", ".join(
-                                                requirement.get(
-                                                    "exceptions",
-                                                    []
-                                                )
+                                                str(x)
+                                                for x in exceptions
                                             )
-                                            or "None identified in retrieved text"
+                                            or
+                                            "None identified in retrieved text"
                                         )}
                                     </div>
 
                                     <br>
 
                                     <div class="requirement-label">
-                                        Cross-references
-                                    </div>
-
-                                    <div class="requirement-value">
-                                        {html.escape(
-                                            ", ".join(
-                                                requirement.get(
-                                                    "cross_references",
-                                                    []
-                                                )
-                                            )
-                                            or "None identified"
-                                        )}
-                                    </div>
-
-                                    <br>
-
-                                    <div class="requirement-label">
-                                        Source
+                                        Scope
                                     </div>
 
                                     <div class="requirement-value">
                                         {html.escape(
                                             str(
                                                 requirement.get(
-                                                    "source",
-                                                    {}
-                                                ).get(
-                                                    "filename",
-                                                    "Unknown"
-                                                )
-                                            )
-                                        )}
-
-                                        {
-                                            " · Page "
-                                            + str(
-                                                requirement.get(
-                                                    "source",
-                                                    {}
-                                                ).get(
-                                                    "page"
-                                                )
-                                            )
-                                            if requirement.get(
-                                                "source",
-                                                {}
-                                            ).get("page")
-                                            else ""
-                                        }
-
-                                        {
-                                            " · "
-                                            + str(
-                                                requirement.get(
-                                                    "source",
-                                                    {}
-                                                ).get(
-                                                    "reference"
-                                                )
-                                            )
-                                            if requirement.get(
-                                                "source",
-                                                {}
-                                            ).get("reference")
-                                            else ""
-                                        }
-                                    </div>
-
-                                </div>
-                                """,
-                                unsafe_allow_html=True,
-                            )
-
-
-        st.markdown("<br>", unsafe_allow_html=True)
-
-        render_trial_status(
-            st,
-            st.session_state.account_token,
-        )
-
-        col_q, col_btn = st.columns([5, 1])
-
-        with col_q:
-
-            question = st.text_input(
-                "Ask a compliance question",
-                placeholder=(
-                    "e.g. What are the Scope 3 emissions "
-                    "disclosure requirements?"
-                ),
-                label_visibility="collapsed",
-                key="question_input",
-            )
-
-        with col_btn:
-
-            ask = st.button("Ask ➤")
-
-        st.markdown(
-            "<p style='font-size:11px; color:#3A4F63; "
-            "margin-top:6px'>Quick questions:</p>",
-            unsafe_allow_html=True,
-        )
-
-        qcols = st.columns(3)
-
-        quick_qs = [
-    "What are the main disclosure requirements?",
-    "What penalties apply for non-compliance?",
-    "Who is responsible for compliance oversight?",
-        ]
+                                                   
