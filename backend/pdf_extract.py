@@ -18,8 +18,25 @@ exactly as it was, and chunk_text/clean_text are reused from it rather
 than duplicated.
 """
 import io
+import re
 import pdfplumber
 from backend.document_processor import clean_text, chunk_text
+
+_PAGE_RE = re.compile(r'\[Page\s+(\d+)\]', re.IGNORECASE)
+_SECTION_PATTERNS = [
+    re.compile(r'\bArticle\s+\d{1,4}[A-Za-z]?\b', re.IGNORECASE),
+    re.compile(r'\b(?:paragraph|section|clause)\s+\d{1,4}(?:\.\d+)*[A-Za-z]?\b', re.IGNORECASE),
+]
+
+def _metadata_for_chunk(text: str) -> tuple[int | None, int | None, str | None]:
+    pages = [int(x) for x in _PAGE_RE.findall(text)]
+    page_start = min(pages) if pages else None
+    page_end = max(pages) if pages else page_start
+    refs = []
+    for rx in _SECTION_PATTERNS:
+        refs.extend(rx.findall(text))
+    reference = refs[0] if refs else None
+    return page_start, page_end, reference
 
 
 def extract_text_from_pdf(file_bytes: bytes) -> str:
@@ -40,4 +57,8 @@ def process_pdf(file_bytes: bytes, filename: str, chunk_size=800, overlap=100):
     chunks = chunk_text(clean, chunk_size, overlap)
     for c in chunks:
         c["source"] = filename
+        page_start, page_end, reference = _metadata_for_chunk(c["text"])
+        c["page_start"] = page_start
+        c["page_end"] = page_end
+        c["section_reference"] = reference
     return chunks, clean

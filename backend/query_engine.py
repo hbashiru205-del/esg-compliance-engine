@@ -1,105 +1,79 @@
-import re
-
 from google import genai
 from google.genai import types
-
 from config.settings import GEMINI_API_KEY, MODEL, MAX_TOKENS
-from backend.requirement_engine import extract_requirements
 
 
-SYSTEM_PROMPT = """
-You are a regulatory compliance analyst.
+SYSTEM_PROMPT = """You are a regulatory compliance analyst. Your job is to answer questions
+strictly based on the document excerpts provided to you, using careful step-by-step legal
+reasoning rather than simple keyword lookup.
 
-Your job is to answer questions strictly from the supplied regulatory
-document excerpts.
+REASONING PROCESS — follow this for every answer:
+1. Identify the general rule that applies to the question, citing its source.
+2. Check the provided excerpts for any exceptions, conditions, or qualifications that might
+   modify that general rule (phrases like "unless", "except where", "subject to", "provided that").
+3. Check for any cross-references to other sections/articles (e.g. "as defined in Article X") —
+   if a referenced section is NOT included in the excerpts provided, explicitly flag this rather
+   than assuming the exception doesn't apply.
+4. If excerpts come from MORE THAN ONE source document, explicitly compare them: state what each
+   document says on the relevant point, label which document each claim comes from, and note
+   where they align, differ, or where one is stricter or more specific than the other.
+5. Apply the rule, any relevant exceptions, and any cross-document comparison to reach a final answer.
 
-IMPORTANT:
-Do not use outside knowledge.
-Do not invent legal requirements.
-Do not invent Article numbers, paragraph numbers, exceptions, dates,
-thresholds, or definitions.
+RULES YOU MUST FOLLOW:
+1. Only use information from the provided excerpts to answer.
+2. If the answer is not in the excerpts, say: "This information is not found in the uploaded documents."
+3. Always cite your source using this format: [Source: filename, Chunk #N]
+4. Never guess, infer, or use external knowledge.
+5. If you identify a cross-reference to a section not included in the excerpts, explicitly note:
+   "This may be qualified by [reference], which is not included in the retrieved excerpts —
+   recommend verifying."
+6. If multiple excerpts are relevant, synthesize them and cite each one used.
+7. If the question asks how requirements differ between documents (e.g. between a baseline
+   standard and a specific jurisdiction's implementation), structure your answer to address
+   each document's position explicitly, by name, before giving a combined conclusion.
 
-For every answer:
-
-1. Identify the relevant requirement or rule.
-2. Check the supplied excerpts for conditions or qualifications.
-3. Check for explicit exceptions.
-4. Check for cross-references to other provisions.
-5. If multiple documents are present, distinguish which document supports
-   each claim.
-6. Give a clear answer based only on the evidence supplied.
-
-If the answer is not contained in the supplied excerpts, say:
-
-"This information is not found in the uploaded documents."
-
-Always cite the supplied source using:
-
-[Source: filename, Chunk #N]
-
-If a page number is available, also include:
-
-[Page: N]
-
-If a regulatory Article, paragraph, or section reference is available,
-include it in the citation.
-
-Never claim that a company or person is legally compliant or non-compliant
-unless the supplied document explicitly establishes that conclusion.
+OUTPUT FORMAT — structure your response EXACTLY like this, with these two labels on their own lines:
+REASONING: [Your step-by-step reasoning process — 2-4 sentences walking through the rule,
+any exceptions found, any cross-references checked, and any cross-document comparison made]
+ANSWER: [Your final, clear answer with citations]
 """
 
 
 def build_context(retrieved_chunks: list) -> str:
-    """
-    Build the document context supplied to Gemini.
-    """
-
     context_parts = []
-
     for i, chunk in enumerate(retrieved_chunks, 1):
-
         source = chunk.get("source", "Unknown")
-        text = chunk.get("text", "")
-
-        page = chunk.get("page")
-
-        reference = chunk.get(
-            "regulatory_reference",
-            "",
-        )
-
-        metadata = (
-            f"DOCUMENT: {source}\n"
-            f"CHUNK: #{chunk.get('index', i)}\n"
-        )
-
-        if page:
-            metadata += f"PAGE: {page}\n"
-
-        if reference:
-            metadata += (
-                f"REGULATORY REFERENCE: {reference}\n"
-            )
-
+        text   = chunk.get("text", "")
         context_parts.append(
-            f"--- EXCERPT {i} ---\n"
-            f"{metadata}"
-            f"TEXT:\n{text}"
+            f"--- Excerpt {i} [DOCUMENT: {source}, Chunk #{chunk.get('index', i)}] ---\n{text}"
         )
+
+    unique_sources = sorted(set(c.get("source", "Unknown") for c in retrieved_chunks))
+    if len(unique_sources) > 1:
+        header = (
+            f"NOTE: These excerpts come from {len(unique_sources)} different documents: "
+            f"{', '.join(unique_sources)}. Compare them explicitly where relevant.\n\n"
+        )
+        return header + "\n\n".join(context_parts)
 
     return "\n\n".join(context_parts)
 
 
-def parse_response(raw_text: str) -> dict:
-    """
-    Clean the model response.
-    """
+def parse_reasoning_response(raw_text: str) -> dict:
+    reasoning = ""
+    answer = raw_text.strip()
 
-    answer = (raw_text or "").strip()
+    if "REASONING:" in raw_text and "ANSWER:" in raw_text:
+        try:
+            after_reasoning = raw_text.split("REASONING:", 1)[1]
+            reasoning_part, answer_part = after_reasoning.split("ANSWER:", 1)
+            reasoning = reasoning_part.strip()
+            answer = answer_part.strip()
+        except (IndexError, ValueError):
+            reasoning = ""
+            answer = raw_text.strip()
 
-    return {
-        "answer": answer,
-    }
+    return {"reasoning": reasoning, "answer": answer}
 
 
 def query_compliance(
@@ -108,99 +82,48 @@ def query_compliance(
     api_key: str = None,
     chat_history: list = None,
 ) -> dict:
-    """
-    Main regulatory question-answering function.
-
-    Existing callers can continue using this function.
-
-    In addition to the normal answer, the response now contains structured
-    regulatory requirements extracted from the retrieved excerpts.
-    """
-
     key = api_key or GEMINI_API_KEY
-
     if not key:
         return {
             "answer": "No API key provided. Please contact support.",
             "reasoning": "",
             "sources_used": [],
             "chunks_retrieved": 0,
-            "requirements": [],
         }
 
     if not retrieved_chunks:
         return {
-            "answer": (
-                "No relevant document sections found. "
-                "Please upload a regulatory document first."
-            ),
+            "answer": "No relevant document sections found. Please upload a regulatory document first.",
             "reasoning": "",
             "sources_used": [],
             "chunks_retrieved": 0,
-            "requirements": [],
         }
 
     context = build_context(retrieved_chunks)
 
-    user_message = f"""
-Use ONLY the supplied regulatory excerpts to answer the question.
+    user_message = f"""Use ONLY the excerpts below to answer the question.
 
 DOCUMENT EXCERPTS:
-
 {context}
 
-QUESTION:
+QUESTION: {question}
 
-{question}
-
-Answer clearly and concisely.
-
-For every important statement, cite the supporting source.
-
-If the information cannot be established from the supplied excerpts,
-say that it is not found in the uploaded documents.
-"""
+Follow the REASONING PROCESS from your instructions, then provide your answer in the
+REASONING: / ANSWER: format specified."""
 
     contents = []
-
     if chat_history:
         for turn in chat_history[-6:]:
-
-            role = (
-                "model"
-                if turn.get("role") == "assistant"
-                else "user"
-            )
-
-            content_text = turn.get(
-                "answer_only",
-                turn.get("content", ""),
-            )
-
+            role = "model" if turn["role"] == "assistant" else "user"
+            content_text = turn.get("answer_only", turn.get("content", ""))
             contents.append(
-                types.Content(
-                    role=role,
-                    parts=[
-                        types.Part(
-                            text=content_text
-                        )
-                    ],
-                )
+                types.Content(role=role, parts=[types.Part(text=content_text)])
             )
-
     contents.append(
-        types.Content(
-            role="user",
-            parts=[
-                types.Part(
-                    text=user_message
-                )
-            ],
-        )
+        types.Content(role="user", parts=[types.Part(text=user_message)])
     )
 
     try:
-
         client = genai.Client(api_key=key)
 
         response = client.models.generate_content(
@@ -212,74 +135,24 @@ say that it is not found in the uploaded documents.
             ),
         )
 
-        raw_text = response.text or ""
+        raw_text = response.text
 
     except Exception as e:
-
         return {
             "answer": f"Error calling Gemini API: {str(e)}",
             "reasoning": "",
             "sources_used": [],
-            "chunks_retrieved": len(
-                retrieved_chunks
-            ),
-            "requirements": [],
+            "chunks_retrieved": len(retrieved_chunks),
         }
 
-    parsed = parse_response(raw_text)
+    parsed = parse_reasoning_response(raw_text)
 
-    answer = parsed["answer"]
-
-    sources = list(
-        set(
-            re.findall(
-                r"\[Source:[^\]]+\]",
-                answer,
-            )
-        )
-    )
-
-    # ---------------------------------------------------------
-    # NEW: STRUCTURED REGULATORY REQUIREMENTS
-    # ---------------------------------------------------------
-    #
-    # This is the layer that lets ClariX move beyond simple RAG.
-    #
-    # The same retrieved excerpts used for the answer are passed
-    # through the requirement engine.
-    #
-    # This produces structured objects containing:
-    # requirement
-    # subject
-    # action
-    # object
-    # conditions
-    # exceptions
-    # scope
-    # cross-references
-    # source
-    #
-    # The existing answer remains unchanged for compatibility.
-    # ---------------------------------------------------------
-
-    try:
-
-        requirements = extract_requirements(
-            retrieved_chunks,
-            api_key=key,
-            max_requirements=10,
-        )
-
-    except Exception:
-
-        requirements = []
+    import re
+    sources = list(set(re.findall(r'\[Source:[^\]]+\]', parsed["answer"])))
 
     return {
-        "answer": answer,
-        "reasoning": "",
-        "sources_used": sources,
-        "chunks_retrieved": len(
-            retrieved_chunks
-        ),
-        "requirements": requirements,
-}
+        "answer":           parsed["answer"],
+        "reasoning":        parsed["reasoning"],
+        "sources_used":     sources,
+        "chunks_retrieved": len(retrieved_chunks),
+    }
