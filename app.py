@@ -682,4 +682,46 @@ with tab1:
                                         {html.escape(
                                             str(
                                                 requirement.get(
+                                                                                                        "scope",
+                                                    ""
+                                                )
+                                                or
+                                                "Not explicitly identified"
+                                            )
+                                        )}
+                                    </div>
+
+                                    <br>
+
+                                    <div class="requirement-label">
+                                        Cross-references
+                                    </div>
+
+                                    <div class="requirement-value">
+                                        {html.escape(
+                                            ", ".join(
+                                                str(x)
+                                                for x in cross_references
+                                            )
+                                            or
+                                            "None identified"
+                                        )}
+                                    </div>
+
+                                    <br>
+
+                                    <div class="requirement-label">
+                                        Source
+                                    </div>
+
+                                    <div class="requirement-value">
+                                        {html.escape(
+                                            source_text
+                                        )}
+                                    </div>
+
+                                </div>
+                                """,
+                                unsafe_allow_html=True,
+        )
                                                    
