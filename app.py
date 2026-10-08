@@ -240,30 +240,37 @@ with tab1:
 
         st.markdown("<br>", unsafe_allow_html=True)
         render_trial_status(st, st.session_state.account_token)
-        col_q, col_btn = st.columns([5, 1])
+                col_q, col_btn = st.columns([5, 1])
+
         with col_q:
             question = st.text_input(
                 "Ask a compliance question",
                 placeholder="e.g. What are the Scope 3 emissions disclosure requirements?",
                 label_visibility="collapsed",
-                key="question_input"
+                key="question_input",
             )
-                      with col_btn:
-                              ask = st.button("Ask ➤")
 
-        st.markdown("<p style='font-size:11px; color:#3A4F63; margin-top:6px'>Quick questions:</p>",
-                    unsafe_allow_html=True)
+        with col_btn:
+            ask = st.button("Ask ➤")
+
+        st.markdown(
+            "<p style='font-size:11px; color:#3A4F63; margin-top:6px'>Quick questions:</p>",
+            unsafe_allow_html=True,
+        )
+
         qcols = st.columns(3)
+
         quick_qs = [
             "What are the main disclosure requirements?",
             "What penalties apply for non-compliance?",
             "Who is responsible for compliance oversight?",
         ]
+
         for i, qq in enumerate(quick_qs):
             with qcols[i]:
                 if st.button(qq, key=f"qq_{i}"):
                     question = qq
-                    ask = True# -- part 5/7 --
+                    ask = True
         if ask and question.strip():
             if trial_exceeded(st.session_state.account_token):
                 render_trial_blocked(st, st.session_state.account_token)
