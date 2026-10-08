@@ -1,12 +1,16 @@
 """
-Structured regulatory requirement extraction and evidence assessment.
+Regulatory understanding layer for ClariX.
 
-This module sits between retrieval and the user-facing workflows:
+Pipeline:
+    retrieved provisions
+        -> structured requirement
+        -> local resolution of cross-references / definitions
+        -> semantic interpretation
+        -> research + evidence-led gap analysis
 
-    PDF -> retrieval -> structured requirement -> research / gap analysis
-
-It deliberately asks the model for a compact, auditable representation of a
-requirement rather than exposing or storing hidden chain-of-thought.
+The module deliberately stores auditable interpretation fields rather than
+hidden chain-of-thought. Every resolved provision keeps its source/page/
+reference so a consultant can inspect the underlying text.
 """
 
 import json
@@ -25,14 +29,14 @@ REQUIREMENT_SCHEMA_HINT = {
     "subject": "who or what the requirement applies to",
     "action": "the required or permitted action",
     "object": "what the action concerns",
-    "conditions": ["conditions that must be satisfied"],
-    "exceptions": ["exceptions or carve-outs explicitly stated"],
-    "scope": "jurisdiction, entity, activity, threshold, or applicability scope stated in the excerpt",
-    "cross_references": ["articles, paragraphs, definitions, standards, or laws referenced by the requirement"],
+    "conditions": ["explicit conditions, thresholds, dates, or qualifiers"],
+    "exceptions": ["explicit exceptions or carve-outs"],
+    "scope": "explicit jurisdiction, entity, activity, threshold, or applicability scope",
+    "cross_references": ["articles, paragraphs, definitions, standards, or laws referenced"],
     "source": {
         "filename": "source filename",
-        "page": "page number if visible in the excerpt, otherwise null",
-        "reference": "Article/paragraph/section reference if visible, otherwise null",
+        "page": "page number if visible",
+        "reference": "Article/paragraph/section reference if visible",
     },
 }
 
@@ -43,6 +47,12 @@ def _extract_json(text: str) -> Any:
         return json.loads(text)
     except json.JSONDecodeError:
         match = re.search(r"\{.*\}", text, flags=re.DOTALL)
+        if match:
+            try:
+                return json.loads(match.group(0))
+            except json.JSONDecodeError:
+                return None
+        match = re.search(r"\[.*\]", text, flags=re.DOTALL)
         if match:
             try:
                 return json.loads(match.group(0))
@@ -72,12 +82,19 @@ def _build_requirement_context(chunks: list[dict]) -> str:
     return "\n\n".join(parts)
 
 
+def _normalise_list(value) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    return [str(x).strip() for x in value if str(x).strip()]
+
+
 def extract_requirements(
     chunks: list[dict],
     api_key: str | None = None,
     max_requirements: int = 10,
+    corpus_chunks: list[dict] | None = None,
 ) -> list[dict]:
-    """Extract structured requirements from retrieved regulatory excerpts."""
+    """Extract structured requirements, then resolve their regulatory context."""
     if not chunks:
         return []
 
@@ -87,28 +104,26 @@ def extract_requirements(
 
     context = _build_requirement_context(chunks)
     prompt = f"""
-You are extracting regulatory requirements for an evidence-led compliance
-workflow.
+You are the regulatory requirement extraction layer of an evidence-led compliance tool.
 
 Use ONLY the supplied excerpts. Do not add outside legal knowledge.
 
-For each distinct obligation or requirement that is actually stated in the
-excerpts, return a structured object with:
+For each distinct obligation or requirement actually stated in the excerpts, return:
 - requirement: concise plain-English statement
 - subject: who/what is subject to it
 - action: required/allowed action
 - object: what the action concerns
-- conditions: explicit conditions or thresholds
+- conditions: explicit conditions, thresholds, dates, qualifiers
 - exceptions: explicit exceptions/carve-outs
 - scope: explicit applicability scope
-- cross_references: references that may affect interpretation
-- source: filename, page, and Article/paragraph/section reference if visible
+- cross_references: every explicit article, paragraph, definition, annex, standard or law reference
+- source: filename, page and Article/paragraph/section reference if visible
 
-Important:
-1. Do not infer an exception merely because none is shown.
-2. Preserve "where applicable", thresholds, dates, conditions, and qualifiers.
-3. If a cross-reference is present but its target text is not supplied, record it.
-4. Do not invent article or paragraph numbers.
+Rules:
+1. Preserve qualifiers such as "where applicable", thresholds, dates and conditions.
+2. Do not infer an exception merely because none is shown.
+3. Record a cross-reference even when its target text is not supplied.
+4. Do not invent article/paragraph numbers.
 5. Return at most {max_requirements} requirements.
 6. Return JSON only as an array.
 
@@ -125,7 +140,7 @@ EXCERPTS:
             model=MODEL,
             contents=[types.Content(role="user", parts=[types.Part(text=prompt)])],
             config=types.GenerateContentConfig(
-                max_output_tokens=min(MAX_TOKENS, 1400),
+                max_output_tokens=min(MAX_TOKENS, 1600),
                 response_mime_type="application/json",
             ),
         )
@@ -147,17 +162,269 @@ EXCERPTS:
             "subject": str(item.get("subject", "")).strip(),
             "action": str(item.get("action", "")).strip(),
             "object": str(item.get("object", "")).strip(),
-            "conditions": item.get("conditions", []) if isinstance(item.get("conditions", []), list) else [],
-            "exceptions": item.get("exceptions", []) if isinstance(item.get("exceptions", []), list) else [],
+            "conditions": _normalise_list(item.get("conditions", [])),
+            "exceptions": _normalise_list(item.get("exceptions", [])),
             "scope": str(item.get("scope", "")).strip(),
-            "cross_references": item.get("cross_references", []) if isinstance(item.get("cross_references", []), list) else [],
+            "cross_references": _normalise_list(item.get("cross_references", [])),
             "source": {
                 "filename": source.get("filename") or chunks[0].get("source", "Unknown"),
                 "page": source.get("page"),
                 "reference": source.get("reference"),
             },
         })
+
+    if corpus_chunks:
+        resolve_regulatory_context(output, corpus_chunks)
     return output
+
+
+_ARTICLE_RE = re.compile(r"\bArticle\s+(\d{1,4}[A-Za-z]?(?:\([0-9A-Za-z]+\))?)\b", re.I)
+_PARAGRAPH_RE = re.compile(r"\b(?:paragraph|para\.?|section)\s+([0-9]{1,4}[A-Za-z]?(?:\([0-9A-Za-z]+\))?)\b", re.I)
+_ANNEX_RE = re.compile(r"\bAnnex\s+([IVXLC0-9A-Za-z-]+)\b", re.I)
+
+
+def _references_from_requirement(requirement: dict) -> list[str]:
+    refs = []
+    for value in requirement.get("cross_references", []):
+        refs.append(str(value))
+    # Also inspect the structured fields because models sometimes mention a
+    # reference in conditions/scope without putting it in cross_references.
+    for field in ("requirement", "conditions", "exceptions", "scope", "object"):
+        value = requirement.get(field, "")
+        text = " ".join(value) if isinstance(value, list) else str(value)
+        refs.extend(m.group(0) for m in _ARTICLE_RE.finditer(text))
+        refs.extend(m.group(0) for m in _PARAGRAPH_RE.finditer(text))
+        refs.extend(m.group(0) for m in _ANNEX_RE.finditer(text))
+    # Preserve order and remove duplicates.
+    seen = set()
+    return [r for r in refs if not (r.lower() in seen or seen.add(r.lower()))]
+
+
+def _ref_matches(text: str, ref: str) -> bool:
+    """Match a referenced provision without treating a number as a loose keyword."""
+    ref = ref.strip()
+    m = re.search(r"Article\s+([0-9]{1,4}[A-Za-z]?(?:\([0-9A-Za-z]+\))?)", ref, re.I)
+    if m:
+        number = re.escape(m.group(1))
+        return bool(re.search(rf"\bArticle\s+{number}\b", text, re.I))
+    m = re.search(r"(?:paragraph|para\.?|section)\s+([0-9]{1,4}[A-Za-z]?(?:\([0-9A-Za-z]+\))?)", ref, re.I)
+    if m:
+        number = re.escape(m.group(1))
+        return bool(re.search(rf"\b(?:paragraph|para\.?|section)\s+{number}\b", text, re.I))
+    m = re.search(r"Annex\s+([IVXLC0-9A-Za-z-]+)", ref, re.I)
+    if m:
+        return bool(re.search(rf"\bAnnex\s+{re.escape(m.group(1))}\b", text, re.I))
+    return ref.lower() in text.lower()
+
+
+def _definition_candidates(requirement: dict, corpus_chunks: list[dict]) -> list[dict]:
+    """Find explicit definition passages for important terms in a requirement."""
+    terms = set()
+    fields = [requirement.get("subject", ""), requirement.get("object", ""), requirement.get("scope", "")]
+    for field in fields:
+        words = re.findall(r"\b[A-Za-z][A-Za-z -]{2,50}\b", str(field))
+        for word in words:
+            word = re.sub(r"\s+", " ", word).strip(" .,:;()")
+            if len(word.split()) <= 5 and len(word) >= 4:
+                terms.add(word)
+
+    candidates = []
+    for chunk in corpus_chunks:
+        text = chunk.get("text", "")
+        lower = text.lower()
+        if not re.search(r"\b(?:means|defined as|definition of|for the purposes of)\b", lower):
+            continue
+        for term in terms:
+            pattern = rf"(?:\"{re.escape(term)}\"|\b{re.escape(term)}\b).{{0,100}}\b(?:means|is defined as)\b"
+            reverse = rf"\b(?:means|is defined as)\b.{{0,120}}(?:\"{re.escape(term)}\"|\b{re.escape(term)}\b)"
+            if re.search(pattern, text, re.I | re.S) or re.search(reverse, text, re.I | re.S):
+                candidates.append(chunk)
+                break
+        if len(candidates) >= 4:
+            break
+    return candidates
+
+
+def _compact_context(chunks: list[dict], limit: int = 7000) -> list[dict]:
+    out, used = [], 0
+    seen = set()
+    for chunk in chunks:
+        key = (chunk.get("source"), chunk.get("index"))
+        if key in seen:
+            continue
+        seen.add(key)
+        text = chunk.get("text", "")
+        if used + len(text) > limit:
+            break
+        out.append(chunk)
+        used += len(text)
+    return out
+
+
+def resolve_regulatory_context(requirements: list[dict], corpus_chunks: list[dict]) -> list[dict]:
+    """Resolve explicit references/definitions locally against the uploaded corpus.
+
+    This is intentionally deterministic and cheap: it does not call an LLM. It
+    creates an auditable context bundle that the semantic interpretation step can
+    reason over.
+    """
+    if not corpus_chunks:
+        return requirements
+
+    for requirement in requirements:
+        refs = _references_from_requirement(requirement)
+        resolved = []
+        unresolved = []
+        for ref in refs:
+            matches = [c for c in corpus_chunks if _ref_matches(c.get("text", ""), ref)]
+            matches = _compact_context(matches[:4], limit=4200)
+            if matches:
+                resolved.append({
+                    "reference": ref,
+                    "found": True,
+                    "provisions": [_source_reference(c) | {"text": c.get("text", "")[:1800]} for c in matches],
+                })
+            else:
+                unresolved.append(ref)
+
+        definitions = []
+        for chunk in _definition_candidates(requirement, corpus_chunks):
+            definitions.append(_source_reference(chunk) | {"text": chunk.get("text", "")[:1800]})
+
+        requirement["resolved_references"] = resolved
+        requirement["unresolved_references"] = unresolved
+        requirement["definitions"] = definitions
+        requirement["regulatory_context"] = [
+            *[p for item in resolved for p in item["provisions"]],
+            *definitions,
+        ]
+
+    return requirements
+
+
+def _semantic_context(requirement: dict) -> str:
+    resolved = requirement.get("regulatory_context", [])
+    if not resolved:
+        return "No additional referenced provisions or explicit definitions were located in the uploaded corpus."
+    parts = []
+    for i, item in enumerate(resolved[:8], 1):
+        parts.append(
+            f"--- RELATED PROVISION {i} ---\n"
+            f"DOCUMENT: {item.get('filename', 'Unknown')}\n"
+            f"PAGE: {item.get('page') or 'unknown'}\n"
+            f"REFERENCE: {item.get('reference') or 'not identified'}\n"
+            f"TEXT:\n{item.get('text', '')}"
+        )
+    return "\n\n".join(parts)
+
+
+def enrich_requirements(requirements: list[dict], api_key: str | None = None) -> list[dict]:
+    """Apply one batched semantic regulatory-understanding pass.
+
+    Batching is deliberate: Andrew's deeper semantic layer should not turn a
+    10-requirement analysis into 10 additional API round trips.
+    """
+    if not requirements:
+        return []
+    key = api_key or GEMINI_API_KEY
+    if not key:
+        return requirements
+
+    items = []
+    for requirement in requirements:
+        items.append({
+            "id": requirement.get("id"),
+            "requirement": requirement.get("requirement"),
+            "subject": requirement.get("subject"),
+            "action": requirement.get("action"),
+            "object": requirement.get("object"),
+            "conditions": requirement.get("conditions", []),
+            "exceptions": requirement.get("exceptions", []),
+            "scope": requirement.get("scope"),
+            "cross_references": requirement.get("cross_references", []),
+            "resolved_references": requirement.get("resolved_references", []),
+            "unresolved_references": requirement.get("unresolved_references", []),
+            "definitions": requirement.get("definitions", []),
+        })
+
+    prompt = f"""
+You are the regulatory semantics layer of ClariX. Interpret the extracted
+requirements below using ONLY their supplied text and the related provisions
+resolved from the same uploaded regulatory corpus.
+
+This is not legal advice. Do not invent facts or outside legal rules.
+Your job is to make the regulatory meaning explicit so another workflow can
+compare the obligation against client evidence.
+
+Return JSON only as an array with one object per input requirement, preserving
+its id. Each object must contain:
+- id
+- applicability: who/what is covered, including thresholds or conditions
+- operative_obligation: the actual duty/permission/prohibition in one sentence
+- qualifiers: material conditions, timing, thresholds, or "where applicable" limits
+- exceptions: explicit carve-outs; do not invent any
+- definitions: important terms whose meaning is supplied by related provisions
+- dependencies: provisions that must be read together with this requirement
+- interpretation_notes: 1-3 short sentences explaining how related provisions
+  change, qualify, or clarify the requirement
+- confidence: exactly "High", "Medium", or "Low"
+
+Important:
+1. If a referenced provision was not found, do not guess what it says. Mention
+   the unresolved reference in interpretation_notes/dependencies.
+2. Distinguish applicability from the operative duty.
+3. Preserve thresholds, dates, exceptions and conditional language.
+4. If the supplied related text does not define a term, do not invent a definition.
+
+INPUT REQUIREMENTS:
+{json.dumps(items, indent=2)}
+"""
+    try:
+        client = genai.Client(api_key=key)
+        response = client.models.generate_content(
+            model=MODEL,
+            contents=[types.Content(role="user", parts=[types.Part(text=prompt)])],
+            config=types.GenerateContentConfig(
+                max_output_tokens=min(MAX_TOKENS, 2400),
+                response_mime_type="application/json",
+            ),
+        )
+        parsed = _extract_json(response.text)
+    except Exception:
+        parsed = None
+
+    by_id = {}
+    if isinstance(parsed, list):
+        by_id = {str(x.get("id")): x for x in parsed if isinstance(x, dict) and x.get("id")}
+
+    for requirement in requirements:
+        semantic = by_id.get(str(requirement.get("id")), {})
+        requirement["interpretation"] = {
+            "applicability": str(semantic.get("applicability", "")).strip(),
+            "operative_obligation": str(semantic.get("operative_obligation", "")).strip() or requirement.get("requirement", ""),
+            "qualifiers": _normalise_list(semantic.get("qualifiers", [])),
+            "exceptions": _normalise_list(semantic.get("exceptions", [])) or requirement.get("exceptions", []),
+            "definitions": _normalise_list(semantic.get("definitions", [])),
+            "dependencies": _normalise_list(semantic.get("dependencies", [])),
+            "interpretation_notes": str(semantic.get("interpretation_notes", "")).strip(),
+            "confidence": semantic.get("confidence") if semantic.get("confidence") in {"High", "Medium", "Low"} else "Medium",
+        }
+    return requirements
+
+def prepare_requirements(
+    chunks: list[dict],
+    api_key: str | None = None,
+    max_requirements: int = 10,
+    corpus_chunks: list[dict] | None = None,
+) -> list[dict]:
+    """One public entry point for extraction + resolution + semantic interpretation."""
+    requirements = extract_requirements(
+        chunks,
+        api_key=api_key,
+        max_requirements=max_requirements,
+        corpus_chunks=corpus_chunks,
+    )
+    return enrich_requirements(requirements, api_key=api_key)
 
 
 def _evidence_context(evidence_chunks: list[dict], max_chars: int = 4500) -> str:
@@ -179,43 +446,33 @@ def _evidence_context(evidence_chunks: list[dict], max_chars: int = 4500) -> str
     return "\n".join(parts) if parts else "No matching evidence was retrieved."
 
 
-def assess_requirement(
-    requirement: dict,
-    evidence_chunks: list[dict],
-    api_key: str | None = None,
-) -> dict:
-    """Assess a requirement against client evidence without making a legal conclusion."""
+def assess_requirement(requirement: dict, evidence_chunks: list[dict], api_key: str | None = None) -> dict:
+    """Assess a requirement against client evidence using the resolved regulatory meaning."""
     key = api_key or GEMINI_API_KEY
     if not key:
-        return {
-            "status": "Potential gap",
-            "assessment": "AI assessment unavailable.",
-            "evidence": [],
-        }
+        return {"status": "Potential gap", "assessment": "AI assessment unavailable.", "evidence": [], "missing_elements": []}
 
     prompt = f"""
-Assess one regulatory requirement against the supplied client-document evidence.
-
-This is an evidence review, not a legal opinion. Use ONLY the requirement and
-evidence below.
+Assess one regulatory requirement against supplied client-document evidence.
+This is an evidence review, not a legal opinion. Use ONLY the requirement,
+its regulatory interpretation/context, and the supplied client evidence.
 
 Return JSON only with:
 - status: exactly one of "Addressed", "Partially addressed", "Potential gap"
-- assessment: 1-3 sentence explanation grounded in the supplied evidence
+- assessment: 1-3 sentences grounded in the evidence and the structured obligation
 - evidence_used: array of objects with filename, page, reference, and short quote
-- missing_elements: array of specific elements of the requirement not demonstrated
+- missing_elements: specific elements of the obligation not demonstrated
 
 Rules:
-1. Addressed only when the supplied evidence clearly demonstrates the requirement.
-2. Partially addressed when some, but not all, required elements are evidenced.
-3. Potential gap when no relevant evidence is found or the evidence clearly misses
-   a material requirement element.
-4. Never invent client evidence.
-5. Do not say that a company is legally non-compliant. Say "potential gap in the
-   provided evidence" instead.
-6. Preserve uncertainty where the evidence is ambiguous.
+1. Test the evidence against the operative obligation AND its applicability/qualifiers.
+2. Apply explicit exceptions only when they are actually established in the supplied context.
+3. Addressed only when the supplied evidence clearly demonstrates the applicable requirement.
+4. Partially addressed when some, but not all, required elements are evidenced.
+5. Potential gap when no relevant evidence is found or material elements are missing.
+6. Never invent client evidence or make a legal conclusion of non-compliance.
+7. If a regulatory dependency remains unresolved, flag it as a verification point.
 
-REQUIREMENT:
+STRUCTURED REQUIREMENT:
 {json.dumps(requirement, indent=2)}
 
 CLIENT EVIDENCE:
@@ -238,7 +495,6 @@ CLIENT EVIDENCE:
 
     if not isinstance(parsed, dict):
         parsed = {}
-
     status = parsed.get("status")
     if status not in {"Addressed", "Partially addressed", "Potential gap"}:
         status = "Potential gap" if not evidence_chunks else "Partially addressed"
@@ -247,41 +503,33 @@ CLIENT EVIDENCE:
         "status": status,
         "assessment": str(parsed.get("assessment") or "No reliable assessment was returned.").strip(),
         "evidence": parsed.get("evidence_used", []) if isinstance(parsed.get("evidence_used", []), list) else [],
-        "missing_elements": parsed.get("missing_elements", []) if isinstance(parsed.get("missing_elements", []), list) else [],
+        "missing_elements": _normalise_list(parsed.get("missing_elements", [])),
     }
 
 
-def run_gap_analysis(
-    requirements: list[dict],
-    client_store,
-    api_key: str | None = None,
-    evidence_top_k: int = 4,
-    max_workers: int = 4,
-) -> list[dict]:
-    """Match requirements to evidence and assess them concurrently.
-
-    Evidence retrieval is local and cheap, while each assessment is a separate
-    Gemini request. Running those requests concurrently cuts total wall-clock
-    time substantially without changing the assessment logic or UI output.
-    """
+def run_gap_analysis(requirements: list[dict], client_store, api_key: str | None = None, evidence_top_k: int = 4, max_workers: int = 4) -> list[dict]:
+    """Match requirements to evidence and assess them concurrently."""
     if not requirements:
         return []
 
     prepared = []
     for requirement in requirements:
+        interpretation = requirement.get("interpretation", {})
         query = " ".join([
             requirement.get("requirement", ""),
             requirement.get("subject", ""),
             requirement.get("action", ""),
             requirement.get("object", ""),
             " ".join(requirement.get("conditions", [])),
+            interpretation.get("operative_obligation", ""),
+            interpretation.get("applicability", ""),
+            " ".join(interpretation.get("qualifiers", [])),
         ]).strip()
         evidence = client_store.retrieve(query, top_k=evidence_top_k) if query else []
         prepared.append((requirement, evidence))
 
     worker_count = max(1, min(max_workers, len(prepared)))
     assessments = [None] * len(prepared)
-
     with ThreadPoolExecutor(max_workers=worker_count) as executor:
         futures = {
             executor.submit(assess_requirement, requirement, evidence, api_key): i
@@ -289,18 +537,12 @@ def run_gap_analysis(
         }
         for future in as_completed(futures):
             index = futures[future]
-            requirement, evidence = prepared[index]
             try:
                 assessments[index] = future.result()
             except Exception:
-                assessments[index] = assess_requirement(requirement, evidence, api_key=api_key)
+                assessments[index] = {"status": "Potential gap", "assessment": "No reliable assessment was returned.", "evidence": [], "missing_elements": []}
 
     return [
-        {**requirement, "assessment": assessments[i] or {
-            "status": "Potential gap",
-            "assessment": "No reliable assessment was returned.",
-            "evidence": [],
-            "missing_elements": [],
-        }}
-        for i, (requirement, _evidence) in enumerate(prepared)
+        {**requirement, "assessment": assessments[i] or {"status": "Potential gap", "assessment": "No reliable assessment was returned.", "evidence": [], "missing_elements": []}}
+        for i, (_requirement, _evidence) in enumerate(prepared)
     ]

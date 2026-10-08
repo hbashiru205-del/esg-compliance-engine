@@ -11,7 +11,7 @@ sys.path.insert(0, os.path.dirname(__file__))
 from backend.pdf_extract import process_pdf
 from backend.balanced_store import BalancedStore
 from backend.query_engine import query_compliance
-from backend.requirement_engine import extract_requirements, run_gap_analysis
+from backend.requirement_engine import prepare_requirements, run_gap_analysis
 from backend.doc_registry import DocRegistry
 from backend.export_ui import export_buttons
 from backend.excerpts_ui import make_excerpt_records, render_excerpts
@@ -307,6 +307,23 @@ def render_finding(item, idx):
     st.markdown(f'<div class="finding"><div class="finding-id">FINDING · {html.escape(item.get("id", f"REQ-{idx+1:03d}"))}</div><div class="finding-title">{html.escape(item.get("requirement", "Requirement"))}</div>{badge(status)}</div>', unsafe_allow_html=True)
     st.markdown("#### Requirement")
     st.write(item.get("requirement", ""))
+    interpretation = item.get("interpretation", {})
+    if interpretation:
+        with st.expander("Regulatory understanding", expanded=True):
+            c1, c2 = st.columns(2)
+            with c1:
+                st.markdown(f"**Applicability**\n\n{interpretation.get('applicability') or 'Not identified'}")
+                st.markdown(f"**Operative obligation**\n\n{interpretation.get('operative_obligation') or item.get('requirement','')}")
+                st.markdown(f"**Qualifiers**\n\n{', '.join(interpretation.get('qualifiers', [])) or 'None identified'}")
+            with c2:
+                st.markdown(f"**Exceptions**\n\n{', '.join(interpretation.get('exceptions', [])) or 'None identified'}")
+                st.markdown(f"**Dependencies**\n\n{', '.join(interpretation.get('dependencies', [])) or 'None identified'}")
+                st.markdown(f"**Confidence**\n\n{interpretation.get('confidence','Medium')}")
+            if interpretation.get("interpretation_notes"):
+                st.info(interpretation["interpretation_notes"])
+        unresolved = item.get("unresolved_references", [])
+        if unresolved:
+            st.warning("Unresolved regulatory references: " + ", ".join(unresolved) + ". Verify these provisions before relying on the finding.")
     source = item.get("source", {})
     st.markdown("#### Regulatory source")
     st.markdown(
@@ -348,6 +365,12 @@ def build_gap_report(results, assessment_name, assessment_id):
         story.append(Paragraph(f"{item.get('id')} · {a.get('status')}", styles["Heading3"]))
         story.append(Paragraph(html.escape(item.get("requirement", "")), styles["BodyText"]))
         story.append(Paragraph(f"Source: {html.escape(src.get('filename','Unknown'))} · {html.escape(str(src.get('reference') or 'not identified'))} · page {html.escape(str(src.get('page') or 'unknown'))}", styles["Small"]))
+        interp = item.get("interpretation", {})
+        if interp:
+            story.append(Paragraph(f"Applicability: {html.escape(interp.get('applicability','') or 'Not identified')}", styles["Small"]))
+            story.append(Paragraph(f"Operative obligation: {html.escape(interp.get('operative_obligation','') or item.get('requirement',''))}", styles["Small"]))
+            if interp.get('interpretation_notes'):
+                story.append(Paragraph(f"Regulatory interpretation: {html.escape(interp.get('interpretation_notes',''))}", styles["Small"]))
         story.append(Paragraph(f"Assessment: {html.escape(a.get('assessment',''))}", styles["Small"]))
         for ev in a.get("evidence", []):
             story.append(Paragraph(f"Evidence: {html.escape(ev.get('filename','Unknown'))} · {html.escape(str(ev.get('reference') or 'not identified'))} · {html.escape(ev.get('quote',''))}", styles["Small"]))
@@ -486,7 +509,7 @@ elif page == "Regulatory Research":
                 with st.spinner("Structuring requirements from the retrieved provisions..."):
                     chunks = reg_store.retrieve(rq, top_k=TOP_K)
                     chunks = reg_registry.add_identity_context(rq, chunks)
-                    st.session_state.structured_requirements = extract_requirements(chunks, api_key=api_key, max_requirements=10)
+                    st.session_state.structured_requirements = prepare_requirements(chunks, api_key=api_key, max_requirements=10, corpus_chunks=reg_store.chunks)
 
         reqs = st.session_state.structured_requirements
         if reqs:
@@ -504,6 +527,19 @@ elif page == "Regulatory Research":
                         st.markdown(f'**Exceptions**\n\n{", ".join(req.get("exceptions", [])) or "None identified"}')
                     src=req.get("source",{})
                     st.caption(f'Source: {src.get("filename","Unknown")} · {src.get("reference") or "reference not identified"} · page {src.get("page") or "unknown"}')
+                    interpretation=req.get("interpretation", {})
+                    if interpretation:
+                        st.markdown("**Regulatory understanding**")
+                        st.markdown(f"**Applicability:** {interpretation.get('applicability') or 'Not identified'}")
+                        st.markdown(f"**Operative obligation:** {interpretation.get('operative_obligation') or req.get('requirement','')}")
+                        if interpretation.get("qualifiers"):
+                            st.markdown(f"**Qualifiers:** {', '.join(interpretation['qualifiers'])}")
+                        if interpretation.get("dependencies"):
+                            st.markdown(f"**Dependencies:** {', '.join(interpretation['dependencies'])}")
+                        if interpretation.get("interpretation_notes"):
+                            st.caption(interpretation["interpretation_notes"])
+                    if req.get("unresolved_references"):
+                        st.warning("Unresolved references: " + ", ".join(req["unresolved_references"]))
 
 
 # -----------------------------------------------------------------------------
@@ -532,7 +568,7 @@ elif page == "Gap Analysis":
                     q = "main obligations requirements disclosure targets policies actions transition plan applicability conditions"
                     req_chunks = reg_store.retrieve(q, top_k=min(12, max(TOP_K, 10)))
                     req_chunks = reg_registry.add_identity_context(q, req_chunks)
-                    reqs = extract_requirements(req_chunks, api_key=api_key, max_requirements=10)
+                    reqs = prepare_requirements(req_chunks, api_key=api_key, max_requirements=10, corpus_chunks=reg_store.chunks)
                     if not reqs:
                         st.error("ClariX could not identify structured requirements from the selected regulatory documents.")
                     else:
