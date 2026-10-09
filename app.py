@@ -591,10 +591,10 @@ elif page == "Gap Analysis":
         d.markdown(metric_card(counts["Potential gap"], "Potential gaps"), unsafe_allow_html=True)
 
         st.markdown("### Findings")
-        for item in results:
+        for idx, item in enumerate(results):
             a=item.get("assessment",{}); status=a.get("status","Potential gap")
             st.markdown(f'<div class="finding"><div class="finding-id">{html.escape(item.get("id",""))}</div><div class="finding-title">{html.escape(item.get("requirement",""))}</div>{badge(status)} <span style="color:#7895a5;font-size:11px">{html.escape(a.get("assessment",""))}</span></div>', unsafe_allow_html=True)
-            if st.button(f'Open finding · {item.get("id")}', key=f'open_{item.get("id")}'):
+            if st.button(f'Open finding · {item.get("id")}', key=f'open_{item.get("id")}_{idx}'):
                 st.session_state.selected_finding = item.get("id","")
 
         selected = next((x for x in results if x.get("id") == st.session_state.selected_finding), results[0])
