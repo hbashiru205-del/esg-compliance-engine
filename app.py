@@ -17,6 +17,7 @@ from backend.export_ui import export_buttons
 from backend.excerpts_ui import make_excerpt_records, render_excerpts
 from backend.trial_gate import trial_exceeded, render_trial_status, render_trial_blocked
 from backend.accounts import valid_name, create_account, get_account, increment_usage
+from backend.admin_ui import render_admin_panel
 from config.settings import CHUNK_SIZE, CHUNK_OVERLAP, TOP_K
 
 
@@ -388,7 +389,7 @@ with st.sidebar:
         unsafe_allow_html=True,
     )
 
-    pages = ["Dashboard", "Regulatory Research", "Gap Analysis", "Documents", "Reports", "Accuracy Test"]
+    pages = ["Dashboard", "Regulatory Research", "Gap Analysis", "Documents", "Reports", "Accuracy Test", "Admin"]
     page = st.radio("Navigation", pages, index=pages.index(st.session_state.page), label_visibility="collapsed")
     st.session_state.page = page
 
@@ -675,6 +676,13 @@ elif page == "Accuracy Test":
                 with st.expander(f"{x['status']} · {x['question']}"):
                     st.write(x["answer"])
                     st.caption(f"Retrieved chunks: {x['n_chunks']} · Cited: {'yes' if x['cited'] else 'no'}")
+
+
+# -----------------------------------------------------------------------------
+# Admin — manual subscription activation and expiry management
+# -----------------------------------------------------------------------------
+elif page == "Admin":
+    render_admin_panel()
 
 
 # -----------------------------------------------------------------------------
