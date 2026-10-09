@@ -20,6 +20,23 @@ from backend.document_processor import clean_text, chunk_text
 logger = logging.getLogger(__name__)
 
 _PAGE_RE = re.compile(r"\[Page\s+(\d+)\]", re.IGNORECASE)
+# ESRS disclosure-requirement codes, e.g. E1-6, S1-14, G1-1, GOV-1, SBM-3,
+# IRO-2, BP-1, MDR-A. A code is only used as a chunk's reference when it is
+# acting as a heading (start of a line) or is explicitly labelled
+# "Disclosure Requirement"/"DR". A code merely mentioned inside a sentence
+# (e.g. "see E1-2") is a cross-reference, not what this chunk is about.
+_ESRS_CODE = (
+    r"(?:(?:E[1-5]|S[1-4]|G1)-\d{1,2}"
+    r"|(?:GOV|SBM|IRO|BP)-\d"
+    r"|MDR-[PAMT])"
+)
+_ESRS_HEADING = re.compile(
+    r"(?:^[ \t]*(?:(?:Disclosure\s+Requirement|DR)\s+)?|"
+    r"\b(?:Disclosure\s+Requirement|DR)\s+)"
+    r"(?:ESRS\s+2\s+)?(" + _ESRS_CODE + r")\b",
+    re.MULTILINE,
+)
+
 _SECTION_PATTERNS = [
     re.compile(r"\bArticle\s+\d{1,4}[A-Za-z]?\b", re.IGNORECASE),
     re.compile(r"\b(?:paragraph|section|clause)\s+\d{1,4}(?:\.\d+)*[A-Za-z]?\b", re.IGNORECASE),
@@ -30,10 +47,15 @@ def _metadata_for_chunk(text: str):
     pages = [int(x) for x in _PAGE_RE.findall(text)]
     page_start = min(pages) if pages else None
     page_end = max(pages) if pages else page_start
-    refs = []
-    for rx in _SECTION_PATTERNS:
-        refs.extend(rx.findall(text))
-    reference = refs[0] if refs else None
+    reference = None
+    heading = _ESRS_HEADING.search(text)
+    if heading:
+        reference = heading.group(1)
+    else:
+        refs = []
+        for rx in _SECTION_PATTERNS:
+            refs.extend(rx.findall(text))
+        reference = refs[0] if refs else None
     return page_start, page_end, reference
 
 
