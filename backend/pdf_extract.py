@@ -1,71 +1,127 @@
-"""Text extraction for process_pdf(), swapped from pypdf to pdfplumber.
-
-pypdf's extract_text() inserts a stray space inside many words on the
-two real regulation PDFs tested here -- "Article" comes out as
-"Ar ticle" on the large majority of pages (a kerning/width-table quirk
-reading these PDFs' embedded CID TrueType fonts). Since the tokenizer
-splits on word boundaries, a broken word never matches the same word
-in a question, which silently weakens retrieval for the single most
-common word in a regulation ("article") -- on every question that
-names an article number, not just the ones this project happened to
-test. pdfplumber extracted both real PDFs with zero broken words on
-any page (58/58 and 16/16 clean, versus 43/58 and 12/16 broken with
-pypdf).
-
-Same function names and output contract as backend.document_processor,
-so this is a drop-in replacement; document_processor.py itself is left
-exactly as it was, and chunk_text/clean_text are reused from it rather
-than duplicated.
-"""
+"""PDF extraction and processing with memory cleanup and timing."""
 import io
 import re
+import time
+import logging
+
 import pdfplumber
 from backend.document_processor import clean_text, chunk_text
+
+logger = logging.getLogger(__name__)
 
 _PAGE_RE = re.compile(r'\[Page\s+(\d+)\]', re.IGNORECASE)
 _SECTION_PATTERNS = [
     re.compile(r'\bArticle\s+\d{1,4}[A-Za-z]?\b', re.IGNORECASE),
-    re.compile(r'\b(?:paragraph|section|clause)\s+\d{1,4}(?:\.\d+)*[A-Za-z]?\b', re.IGNORECASE),
+    re.compile(
+        r'\b(?:paragraph|section|clause)\s+\d{1,4}'
+        r'(?:\.\d+)*[A-Za-z]?\b',
+        re.IGNORECASE,
+    ),
 ]
 
-def _metadata_for_chunk(text: str) -> tuple[int | None, int | None, str | None]:
+
+def _metadata_for_chunk(text):
     pages = [int(x) for x in _PAGE_RE.findall(text)]
     page_start = min(pages) if pages else None
     page_end = max(pages) if pages else page_start
-    refs = []
-    for rx in _SECTION_PATTERNS:
-        refs.extend(rx.findall(text))
-    reference = refs[0] if refs else None
+
+    reference = None
+    for pattern in _SECTION_PATTERNS:
+        match = pattern.search(text)
+        if match:
+            reference = match.group(0)
+            break
+
     return page_start, page_end, reference
 
 
 def extract_text_from_pdf(file_bytes: bytes) -> str:
-    """Extract raw text from PDF bytes."""
+    """Extract PDF text and release each page's cached resources."""
+    started = time.perf_counter()
     pages = []
+    page_count = 0
+    extracted_chars = 0
+
     with pdfplumber.open(io.BytesIO(file_bytes)) as pdf:
+        page_count = len(pdf.pages)
+
         for i, page in enumerate(pdf.pages):
+            page_started = time.perf_counter()
+            text = ""
+
             try:
                 text = page.extract_text() or ""
             finally:
-                # pdfplumber caches every parsed page; without this a
-                # large PDF can use gigabytes of RAM and crash the host.
                 page.flush_cache()
                 if hasattr(page, "close"):
                     page.close()
+
             if text.strip():
-                pages.append(f"[Page {i+1}]\n{text.strip()}")
-    return "\n\n".join(pages)
+                page_text = text.strip()
+                pages.append(f"[Page {i + 1}]\n{page_text}")
+                extracted_chars += len(page_text)
+
+            # Log slow pages only, avoiding excessive log output.
+            elapsed = time.perf_counter() - page_started
+            if elapsed >= 1.0:
+                logger.info(
+                    "PDF page %s/%s took %.2fs",
+                    i + 1, page_count, elapsed,
+                )
+
+    result = "\n\n".join(pages)
+
+    logger.info(
+        "PDF extraction: pages=%s, chars=%s, seconds=%.2f",
+        page_count,
+        extracted_chars,
+        time.perf_counter() - started,
+    )
+    return result
 
 
-def process_pdf(file_bytes: bytes, filename: str, chunk_size=800, overlap=100):
-    """Full pipeline: bytes -> cleaned chunks with metadata."""
+def process_pdf(
+    file_bytes: bytes,
+    filename: str,
+    chunk_size=800,
+    overlap=100,
+):
+    """Process PDF bytes into cleaned, chunked text with metadata."""
+    total_started = time.perf_counter()
+
+    started = time.perf_counter()
     raw = extract_text_from_pdf(file_bytes)
+    extraction_seconds = time.perf_counter() - started
+
+    started = time.perf_counter()
     clean = clean_text(raw)
+    cleaning_seconds = time.perf_counter() - started
+
+    started = time.perf_counter()
     chunks = chunk_text(clean, chunk_size, overlap)
-    for c in chunks:
-        c["source"] = filename
-        page_start, page_end, reference = _metadata_for_chunk(c["text"])
-        c["page_start"] = page_start
-        c["page_end"] = page_end
-        c["section_reference"] = reference
+    chunking_seconds = time.perf_counter() - started
+
+    started = time.perf_counter()
+    for chunk in chunks:
+        chunk["source"] = filename
+        page_start, page_end, reference = _metadata_for_chunk(
+            chunk["text"]
+        )
+        chunk["page_start"] = page_start
+        chunk["page_end"] = page_end
+        chunk["section_reference"] = reference
+    metadata_seconds = time.perf_counter() - started
+
+    logger.info(
+        "PDF processing for %s: extraction=%.2fs, cleaning=%.2fs, "
+        "chunking=%.2fs, metadata=%.2fs, chunks=%s, total=%.2fs",
+        filename,
+        extraction_seconds,
+        cleaning_seconds,
+        chunking_seconds,
+        metadata_seconds,
+        len(chunks),
+        time.perf_counter() - total_started,
+    )
+
     return chunks, clean
