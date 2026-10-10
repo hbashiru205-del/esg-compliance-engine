@@ -16,7 +16,7 @@ from backend.doc_registry import DocRegistry
 from backend.export_ui import export_buttons
 from backend.excerpts_ui import make_excerpt_records, render_excerpts
 from backend.trial_gate import trial_exceeded, render_trial_status, render_trial_blocked
-from backend.accounts import valid_name, create_account, get_account, increment_usage
+from backend.accounts import valid_name, valid_username, create_user, authenticate_user, get_account, increment_usage
 from backend.admin_ui import render_admin_panel
 from config.settings import CHUNK_SIZE, CHUNK_OVERLAP, TOP_K
 
@@ -188,17 +188,49 @@ if account is None:
         """,
         unsafe_allow_html=True,
     )
-    st.markdown("### Start your free trial")
-    st.caption("Enter your name to begin. No email or password is required.")
-    name_input = st.text_input("Your name", key="trial_name_input")
-    if st.button("Start ClariX", type="primary"):
-        if valid_name(name_input):
-            token = create_account(name_input)
-            st.session_state.account_token = token
-            st.query_params["acct"] = token
-            st.rerun()
-        else:
-            st.error("Please enter a valid name.")
+    st.markdown("### Welcome to ClariX")
+    st.caption("Sign in to your account or create one. No email or Google account is required.")
+    login_tab, create_tab = st.tabs(["Log in", "Create account"])
+
+    with login_tab:
+        with st.form("clarix_login_form"):
+            login_username = st.text_input("Username", key="login_username")
+            login_password = st.text_input("Password", type="password", key="login_password")
+            remember_me = st.checkbox("Remember this browser", value=True, key="remember_login")
+            login_submit = st.form_submit_button("Log in", type="primary", use_container_width=True)
+        if login_submit:
+            token = authenticate_user(login_username, login_password)
+            if token:
+                st.session_state.account_token = token
+                if remember_me:
+                    st.query_params["acct"] = token
+                else:
+                    st.query_params.clear()
+                st.rerun()
+            else:
+                st.error("Username or password is incorrect.")
+
+    with create_tab:
+        with st.form("clarix_create_account_form"):
+            create_name = st.text_input("Your name", key="create_account_name")
+            create_username = st.text_input("Choose a username", key="create_account_username", help="3–32 characters: letters, numbers, dots, underscores, or hyphens.")
+            create_password = st.text_input("Create a password", type="password", key="create_account_password", help="Use at least 8 characters.")
+            confirm_password = st.text_input("Confirm password", type="password", key="confirm_account_password")
+            create_submit = st.form_submit_button("Create account", type="primary", use_container_width=True)
+        if create_submit:
+            if create_password != confirm_password:
+                st.error("The passwords do not match.")
+            else:
+                try:
+                    token = create_user(create_username, create_password, create_name)
+                    st.session_state.account_token = token
+                    st.query_params["acct"] = token
+                    st.success("Account created. Welcome to ClariX!")
+                    st.rerun()
+                except ValueError as exc:
+                    st.error(str(exc))
+                except Exception:
+                    st.error("ClariX could not create your account right now. Please try again.")
     st.stop()
 
 
@@ -421,6 +453,10 @@ with st.sidebar:
     st.markdown(f'<div class="sidebar-note"><b>{html.escape(account["account_name"])}</b><br>{len(st.session_state.reg_docs)} regulatory · {len(st.session_state.client_docs)} client documents<br>{reg_store.doc_count + client_store.doc_count} indexed chunks</div>', unsafe_allow_html=True)
     if st.button("Clear workspace"):
         clear_all(); st.rerun()
+    if st.button("Log out", key="logout_button"):
+        st.session_state.account_token = ""
+        st.query_params.clear()
+        st.rerun()
 
 
 # -----------------------------------------------------------------------------

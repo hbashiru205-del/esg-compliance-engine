@@ -1,11 +1,14 @@
 """Persistent accounts with manual subscription expiry."""
-import re, secrets, sqlite3
+import hashlib, hmac, re, secrets, sqlite3
 from datetime import date
 from pathlib import Path
 
 DB_PATH = Path(__file__).parent / "clarix_accounts.db"
 _NAME_RE = re.compile(r"^[A-Za-z0-9 ,.\-']{1,60}$")
 _DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+_USERNAME_RE = re.compile(r"^[A-Za-z0-9_.-]{3,32}$")
+_HASH_ROUNDS = 600_000
+_SECRET_COLUMNS = ("password_salt", "password_hash")  # never returned to callers
 
 def _connect():
     conn = sqlite3.connect(DB_PATH, timeout=15)
@@ -23,12 +26,18 @@ def _connect():
         "unlocked":"INTEGER NOT NULL DEFAULT 0",
         "created_at":"TEXT NOT NULL DEFAULT (datetime('now'))",
         "paid_through":"TEXT", "suspended":"INTEGER NOT NULL DEFAULT 0",
-        "activated_at":"TEXT"}
+        "activated_at":"TEXT",
+        "username":"TEXT", "password_salt":"TEXT", "password_hash":"TEXT"}
     for col, definition in migrations.items():
         if col not in cols:
             conn.execute(f"ALTER TABLE accounts ADD COLUMN {col} {definition}")
+    conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_accounts_username ON accounts(username) WHERE username IS NOT NULL")
     conn.commit()
     return conn
+
+def _public(row):
+    """Row as a dict without password material."""
+    return {k: row[k] for k in row.keys() if k not in _SECRET_COLUMNS}
 
 def valid_name(name):
     return bool(name) and bool(_NAME_RE.fullmatch(name.strip()))
@@ -56,7 +65,7 @@ def get_account(token):
         row = conn.execute("SELECT * FROM accounts WHERE token=?", (token,)).fetchone()
     finally: conn.close()
     if row is None: return None
-    d = dict(row)
+    d = _public(row)
     d["unlocked"] = bool(d["unlocked"])
     d["suspended"] = bool(d["suspended"])
     d["subscription_active"] = _active(row)
@@ -113,9 +122,67 @@ def list_accounts():
     finally: conn.close()
     result = []
     for row in rows:
-        d = dict(row)
+        d = _public(row)
         d["unlocked"] = bool(d["unlocked"]); d["suspended"] = bool(d["suspended"])
         d["subscription_active"] = _active(row)
         d["expired"] = bool(d["unlocked"] and d["paid_through"] and not d["suspended"] and not d["subscription_active"])
         result.append(d)
     return result
+
+# ---------------------------------------------------------------------------
+# Username / password sign-in (PBKDF2-HMAC-SHA256, per-user random salt)
+# ---------------------------------------------------------------------------
+def normalize_username(username):
+    return (username or "").strip().lower()
+
+def valid_username(username):
+    return bool(_USERNAME_RE.fullmatch(normalize_username(username)))
+
+def _password_hash(password, salt):
+    return hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"),
+                               bytes.fromhex(salt), _HASH_ROUNDS).hex()
+
+def create_user(username, password, account_name):
+    username = normalize_username(username)
+    account_name = (account_name or "").strip()
+    if not valid_username(username):
+        raise ValueError("Username must be 3–32 characters and use only letters, numbers, dots, underscores, or hyphens.")
+    if not valid_name(account_name):
+        raise ValueError("Please enter a valid name (up to 60 characters).")
+    if not password or len(password) < 8:
+        raise ValueError("Password must be at least 8 characters long.")
+    if len(password) > 1024:
+        raise ValueError("Password is too long.")
+    token = secrets.token_urlsafe(32)
+    salt = secrets.token_hex(16)
+    digest = _password_hash(password, salt)
+    conn = _connect()
+    try:
+        conn.execute("INSERT INTO accounts (token, account_name, username, password_salt, password_hash) VALUES (?, ?, ?, ?, ?)",
+                     (token, account_name, username, salt, digest))
+        conn.commit()
+    except sqlite3.IntegrityError as exc:
+        raise ValueError("That username is already taken. Please choose another.") from exc
+    finally:
+        conn.close()
+    return token
+
+def authenticate_user(username, password):
+    username = normalize_username(username)
+    if not username or not password or len(password) > 1024:
+        return None
+    conn = _connect()
+    try:
+        row = conn.execute("SELECT token, password_salt, password_hash FROM accounts WHERE username = ?",
+                           (username,)).fetchone()
+    finally:
+        conn.close()
+    if not row or not row["password_salt"] or not row["password_hash"]:
+        # Spend similar time as a real check so unknown usernames are not revealed by timing.
+        _password_hash(password, "00" * 16)
+        return None
+    try:
+        candidate = _password_hash(password, row["password_salt"])
+    except (ValueError, TypeError):
+        return None
+    return row["token"] if hmac.compare_digest(candidate, row["password_hash"]) else None
