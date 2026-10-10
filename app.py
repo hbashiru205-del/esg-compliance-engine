@@ -10,14 +10,10 @@ sys.path.insert(0, os.path.dirname(__file__))
 
 from backend.pdf_extract import process_pdf
 from backend.balanced_store import BalancedStore
-from backend.query_engine import query_compliance
 from backend.requirement_engine import prepare_requirements, run_gap_analysis
 from backend.doc_registry import DocRegistry
-from backend.export_ui import export_buttons
-from backend.excerpts_ui import make_excerpt_records, render_excerpts
 from backend.trial_gate import trial_exceeded, render_trial_status, render_trial_blocked
-from backend.accounts import valid_name, valid_username, create_user, authenticate_user, login_lockout_seconds, get_account, increment_usage
-from backend.admin_ui import render_admin_panel
+from backend.accounts import create_user, authenticate_user, login_lockout_seconds, get_account, increment_usage, storage_mode
 from config.settings import CHUNK_SIZE, CHUNK_OVERLAP, TOP_K
 
 
@@ -168,30 +164,26 @@ ss_init("gap_results", [])
 ss_init("assessment_name", "")
 ss_init("assessment_id", "")
 ss_init("test_results", None)
-ss_init("page", "Dashboard")
+ss_init("page", "Obligation Intelligence")
 ss_init("selected_finding", "")
 
 account = get_account(st.session_state.account_token)
 
-
-# -----------------------------------------------------------------------------
-# Trial start
-# -----------------------------------------------------------------------------
+# Login / account creation. The durable account database is configured separately
+# from the temporary in-memory document workspace.
 if account is None:
     st.markdown(
         """
         <div class="hero">
             <div class="hero-kicker">ClariX Intelligence</div>
-            <h1>Evidence-led regulatory intelligence.</h1>
-            <p>Turn regulations into traceable requirements, source evidence and clearer gap-analysis findings.</p>
+            <h1>Understand obligations. Assess evidence.</h1>
+            <p>One focused regulatory workflow, from structured obligations to evidence-led gap analysis.</p>
         </div>
-        """,
-        unsafe_allow_html=True,
+        """, unsafe_allow_html=True,
     )
     st.markdown("### Welcome to ClariX")
-    st.caption("Sign in to your account or create one. No email or Google account is required.")
+    st.caption("Sign in or create an account. Passwords are stored as salted hashes, not plain text.")
     login_tab, create_tab = st.tabs(["Log in", "Create account"])
-
     with login_tab:
         with st.form("clarix_login_form"):
             login_username = st.text_input("Username", key="login_username")
@@ -199,20 +191,22 @@ if account is None:
             remember_me = st.checkbox("Remember this browser", value=True, key="remember_login")
             login_submit = st.form_submit_button("Log in", type="primary", use_container_width=True)
         if login_submit:
-            wait = login_lockout_seconds(login_username)
-            token = None if wait else authenticate_user(login_username, login_password)
-            if wait:
-                st.error(f"Too many failed attempts. Please try again in about {max(1, -(-wait // 60))} minute(s).")
-            elif token:
-                st.session_state.account_token = token
-                if remember_me:
-                    st.query_params["acct"] = token
+            try:
+                wait = login_lockout_seconds(login_username)
+                token = None if wait else authenticate_user(login_username, login_password)
+                if wait:
+                    st.error(f"Too many failed attempts. Please try again in about {max(1, -(-wait // 60))} minute(s).")
+                elif token:
+                    st.session_state.account_token = token
+                    if remember_me:
+                        st.query_params["acct"] = token
+                    else:
+                        st.query_params.clear()
+                    st.rerun()
                 else:
-                    st.query_params.clear()
-                st.rerun()
-            else:
-                st.error("Username or password is incorrect.")
-
+                    st.error("Username or password is incorrect.")
+            except Exception:
+                st.error("ClariX could not reach the account database. Check DATABASE_URL configuration.")
     with create_tab:
         with st.form("clarix_create_account_form"):
             create_name = st.text_input("Your name", key="create_account_name")
@@ -228,12 +222,11 @@ if account is None:
                     token = create_user(create_username, create_password, create_name)
                     st.session_state.account_token = token
                     st.query_params["acct"] = token
-                    st.success("Account created. Welcome to ClariX!")
                     st.rerun()
                 except ValueError as exc:
                     st.error(str(exc))
                 except Exception:
-                    st.error("ClariX could not create your account right now. Please try again.")
+                    st.error("ClariX could not create the account. Check the database configuration and try again.")
     st.stop()
 
 
@@ -457,16 +450,17 @@ def build_gap_report(results, assessment_name, assessment_id):
 
 
 # -----------------------------------------------------------------------------
-# Sidebar navigation and document management
+# Navigation and required document inputs
 # -----------------------------------------------------------------------------
 with st.sidebar:
     st.markdown(
-        '<div class="brand"><div class="brand-mark">◈</div><div><div class="brand-name">ClariX</div><div class="brand-sub">REGULATORY INTELLIGENCE</div></div></div>',
+        '<div class="brand"><div class="brand-mark">◈</div><div><div class="brand-name">ClariX</div><div class="brand-sub">OBLIGATION INTELLIGENCE</div></div></div>',
         unsafe_allow_html=True,
     )
-
-    pages = ["Dashboard", "Regulatory Research", "Gap Analysis", "Documents", "Reports", "Accuracy Test", "Admin"]
-    page = st.radio("Navigation", pages, index=pages.index(st.session_state.page), label_visibility="collapsed")
+    pages = ["Obligation Intelligence", "Gap Analysis"]
+    if st.session_state.page not in pages:
+        st.session_state.page = pages[0]
+    page = st.radio("Workspace", pages, index=pages.index(st.session_state.page), label_visibility="collapsed")
     st.session_state.page = page
 
     st.markdown("---")
@@ -481,318 +475,167 @@ with st.sidebar:
         st.session_state.client_docs = process_uploads(client_files, client_store, client_registry, st.session_state.client_docs, "client documents")
 
     st.markdown("---")
-    st.markdown(f'<div class="sidebar-note"><b>{html.escape(account["account_name"])}</b><br>{len(st.session_state.reg_docs)} regulatory · {len(st.session_state.client_docs)} client documents<br>{reg_store.doc_count + client_store.doc_count} indexed chunks</div>', unsafe_allow_html=True)
+    mode = storage_mode()
+    if mode == "sqlite-local":
+        st.warning("Account storage is using local SQLite. Configure DATABASE_URL for account records to survive hosting redeployments.")
+    st.markdown(f'<div class="sidebar-note"><b>{html.escape(account["account_name"])}</b><br>{len(st.session_state.reg_docs)} regulatory · {len(st.session_state.client_docs)} evidence PDFs</div>', unsafe_allow_html=True)
     if st.button("Clear workspace"):
-        clear_all(); st.rerun()
+        clear_all()
+        st.rerun()
     if st.button("Log out", key="logout_button"):
         clear_all()   # never leave one user's documents, chat or findings in the session for the next login
         st.session_state.test_results = None
         st.session_state.selected_finding = ""
-        st.session_state.page = "Dashboard"
+        st.session_state.page = "Obligation Intelligence"
         st.session_state.account_token = ""
         st.query_params.clear()
         st.rerun()
 
-
 # -----------------------------------------------------------------------------
-# Global header
+# Shared header
 # -----------------------------------------------------------------------------
 st.markdown(
     """
     <div class="hero">
-        <div class="hero-kicker">Evidence-led regulatory intelligence</div>
-        <h1>FROM REGULATION TO A CLEAR ASSESSMENT</h1>
-        <p>Every requirement. Every source. Every relevant piece of evidence. ClariX helps consultants move from regulatory text to a traceable research and gap-analysis workflow.</p>
+        <div class="hero-kicker">ClariX Intelligence</div>
+        <h1>REGULATORY OBLIGATIONS → EVIDENCE-LED ASSESSMENT</h1>
+        <p>Interpret regulatory requirements in a structured, traceable form, then assess what the selected evidence actually demonstrates.</p>
     </div>
-    """,
-    unsafe_allow_html=True,
+    """, unsafe_allow_html=True,
 )
-
-
-# -----------------------------------------------------------------------------
-# Dashboard
-# -----------------------------------------------------------------------------
-if page == "Dashboard":
-    st.markdown('<div class="section-title"><h2>Workspace overview</h2><p>Your current regulatory research and evidence-led assessment workspace.</p></div>', unsafe_allow_html=True)
-    counts = gap_counts(st.session_state.gap_results)
-    c1,c2,c3,c4 = st.columns(4)
-    c1.markdown(metric_card(1 if st.session_state.gap_results else 0, "Active assessments"), unsafe_allow_html=True)
-    c2.markdown(metric_card(len(st.session_state.reg_docs) + len(st.session_state.client_docs), "Documents"), unsafe_allow_html=True)
-    c3.markdown(metric_card(counts["Potential gap"], "Potential gaps"), unsafe_allow_html=True)
-    c4.markdown(metric_card(len(st.session_state.structured_requirements), "Requirements identified"), unsafe_allow_html=True)
-
-    st.markdown('<div class="section-title"><h2>Assessment workflow</h2></div>', unsafe_allow_html=True)
-    st.markdown('<div class="workflow"><span class="workflow-step">Regulation</span><span class="workflow-arrow">→</span><span class="workflow-step">Requirement</span><span class="workflow-arrow">→</span><span class="workflow-step">Source</span><span class="workflow-arrow">→</span><span class="workflow-step">Client evidence</span><span class="workflow-arrow">→</span><span class="workflow-step">Gap assessment</span></div>', unsafe_allow_html=True)
-
-    left, right = st.columns([1.35, 1])
-    with left:
-        st.markdown('<div class="section-title"><h2>Current assessment</h2></div>', unsafe_allow_html=True)
-        if st.session_state.gap_results:
-            name = st.session_state.assessment_name or "Current assessment"
-            st.markdown(f'<div class="card"><b>{html.escape(name)}</b><br><span style="color:#7895a5;font-size:12px">{html.escape(st.session_state.assessment_id or "CLX-2026-001")} · {len(st.session_state.gap_results)} requirements reviewed</span></div>', unsafe_allow_html=True)
-            cc = gap_counts(st.session_state.gap_results)
-            a,b,c = st.columns(3)
-            a.markdown(metric_card(cc["Addressed"], "Addressed"), unsafe_allow_html=True)
-            b.markdown(metric_card(cc["Partially addressed"], "Partially addressed"), unsafe_allow_html=True)
-            c.markdown(metric_card(cc["Potential gap"], "Potential gaps"), unsafe_allow_html=True)
-        else:
-            st.info("No assessment yet. Upload a regulatory framework and client evidence, then open Gap Analysis.")
-            if st.button("Start a new gap analysis", type="primary"):
-                st.session_state.page = "Gap Analysis"; st.rerun()
-    with right:
-        st.markdown('<div class="section-title"><h2>Documents</h2></div>', unsafe_allow_html=True)
-        if st.session_state.reg_docs or st.session_state.client_docs:
-            for name in st.session_state.reg_docs:
-                st.markdown(f'<div class="finding"><b>REGULATION</b><br>{html.escape(name)}</div>', unsafe_allow_html=True)
-            for name in st.session_state.client_docs:
-                st.markdown(f'<div class="finding"><b>CLIENT EVIDENCE</b><br>{html.escape(name)}</div>', unsafe_allow_html=True)
-        else:
-            st.caption("No documents uploaded yet.")
-
+render_trial_status(st, st.session_state.account_token)
 
 # -----------------------------------------------------------------------------
-# Regulatory Research
+# Feature 1: Obligation Intelligence
 # -----------------------------------------------------------------------------
-elif page == "Regulatory Research":
-    st.markdown('<div class="section-title"><h2>Regulatory Research</h2><p>Ask questions against your uploaded regulatory corpus, then structure the relevant requirements.</p></div>', unsafe_allow_html=True)
-    render_trial_status(st, st.session_state.account_token)
-
+if page == "Obligation Intelligence":
+    st.markdown('<div class="section-title"><h2>Obligation Intelligence</h2><p>Extract and interpret obligations, preserving scope, conditions, exceptions and cross-references.</p></div>', unsafe_allow_html=True)
     if not st.session_state.reg_docs:
-        st.info("Upload one or more regulatory PDFs using the sidebar to begin.")
+        st.info("Upload a regulatory PDF from the sidebar to begin.")
     else:
-        q = st.text_input("Research question", placeholder="e.g. What are the climate transition-plan requirements?", key="research_question")
-        if st.button("Run regulatory research", type="primary") and q.strip():
+        topic = st.text_input("What regulatory area should ClariX analyse?", placeholder="e.g. ESRS E1 climate transition plans", key="obligation_topic")
+        st.caption("ClariX currently returns a limited set of requirements per run. This is not a completeness-certified inventory of the entire regulation.")
+        if st.button("Analyse obligations", type="primary"):
             if trial_exceeded(st.session_state.account_token):
                 render_trial_blocked(st, st.session_state.account_token)
             elif not api_key:
-                st.error("System configuration issue — please contact support.")
+                st.error("System configuration issue — GEMINI_API_KEY is not configured.")
             else:
-                with st.spinner("Retrieving relevant provisions and preparing a cited answer..."):
-                    chunks = reg_store.retrieve(q, top_k=TOP_K)
-                    chunks = reg_registry.add_identity_context(q, chunks)
-                    response = query_compliance(q, chunks, api_key=api_key, chat_history=st.session_state.chat)
-                st.session_state.chat.append({"role":"user","content":q})
-                st.session_state.chat.append({"role":"assistant","content":response["answer"],"answer_only":response["answer"],"reasoning":response.get("reasoning",""),"citations":response["sources_used"],"excerpts":make_excerpt_records(chunks)})
+                query = topic.strip() or "requirements obligations applicability conditions exceptions thresholds cross references"
+                with st.spinner("Retrieving provisions and interpreting their regulatory context..."):
+                    selected_chunks = []
+                    seen = set()
+                    for q in [query, f"{query} conditions exceptions thresholds scope", f"{query} definitions cross-references obligations"]:
+                        for chunk in reg_store.retrieve(q, top_k=min(10, max(6, TOP_K))):
+                            key = (chunk.get("source"), chunk.get("id") or chunk.get("index"), chunk.get("text", "")[:100])
+                            if key not in seen:
+                                seen.add(key)
+                                selected_chunks.append(chunk)
+                    selected_chunks = reg_registry.add_identity_context(query, selected_chunks)
+                    requirements = prepare_requirements(selected_chunks, api_key=api_key, max_requirements=10, corpus_chunks=reg_store.chunks)
                 increment_usage(st.session_state.account_token)
-                st.rerun()
+                st.session_state.structured_requirements = requirements
+                st.session_state.gap_results = []
+                st.session_state.selected_finding = ""
+                if requirements:
+                    st.success(f"Prepared {len(requirements)} structured obligation(s). Review these before running gap analysis.")
+                else:
+                    st.error("No structured obligations were returned. Try a more specific topic or inspect the uploaded PDF text.")
 
-        if st.session_state.chat:
-            last_answer = st.session_state.chat[-1]
-            if last_answer.get("role") == "assistant":
-                st.markdown('<div class="section-title"><h3>Latest answer</h3></div>', unsafe_allow_html=True)
-                st.markdown(f'<div class="answer-box">{last_answer.get("content","")}</div>', unsafe_allow_html=True)
-                render_excerpts(st, last_answer.get("excerpts", []))
-            export_buttons(st, st.session_state.chat, reg_registry)
-
-        st.markdown("---")
-        st.markdown("### Structure regulatory requirements")
-        rq = st.text_input("Regulatory area", placeholder="e.g. climate transition plans, Scope 3 disclosures", key="structure_question")
-        if st.button("Extract structured requirements", key="structure_btn") and rq.strip():
-            if not api_key:
-                st.error("System configuration issue — please contact support.")
-            else:
-                with st.spinner("Structuring requirements from the retrieved provisions..."):
-                    chunks = reg_store.retrieve(rq, top_k=TOP_K)
-                    chunks = reg_registry.add_identity_context(rq, chunks)
-                    st.session_state.structured_requirements = prepare_requirements(chunks, api_key=api_key, max_requirements=10, corpus_chunks=reg_store.chunks)
-
-        reqs = st.session_state.structured_requirements
-        if reqs:
-            st.success(f"{len(reqs)} structured requirement(s) identified.")
-            for req in reqs:
-                with st.expander(f'{req["id"]} · {req["requirement"]}'):
-                    a,b = st.columns(2)
-                    with a:
-                        st.markdown(f'**Subject**\n\n{req.get("subject") or "Not identified"}')
-                        st.markdown(f'**Action**\n\n{req.get("action") or "Not identified"}')
-                        st.markdown(f'**Object**\n\n{req.get("object") or "Not identified"}')
-                    with b:
-                        st.markdown(f'**Scope**\n\n{req.get("scope") or "Not identified"}')
-                        st.markdown(f'**Conditions**\n\n{", ".join(req.get("conditions", [])) or "None identified"}')
-                        st.markdown(f'**Exceptions**\n\n{", ".join(req.get("exceptions", [])) or "None identified"}')
-                    src=req.get("source",{})
-                    st.caption(f'Source: {src.get("filename","Unknown")} · {src.get("reference") or "reference not identified"} · page {src.get("page") or "unknown"}')
-                    interpretation=req.get("interpretation", {})
-                    if interpretation:
-                        st.markdown("**Regulatory understanding**")
-                        st.markdown(f"**Applicability:** {interpretation.get('applicability') or 'Not identified'}")
-                        st.markdown(f"**Operative obligation:** {interpretation.get('operative_obligation') or req.get('requirement','')}")
-                        if interpretation.get("qualifiers"):
-                            st.markdown(f"**Qualifiers:** {', '.join(interpretation['qualifiers'])}")
-                        if interpretation.get("dependencies"):
-                            st.markdown(f"**Dependencies:** {', '.join(interpretation['dependencies'])}")
-                        if interpretation.get("interpretation_notes"):
-                            st.caption(interpretation["interpretation_notes"])
-                    if req.get("unresolved_references"):
-                        st.warning("Unresolved references: " + ", ".join(req["unresolved_references"]))
-
+    if st.session_state.structured_requirements:
+        st.markdown("### Structured obligations")
+        for req in st.session_state.structured_requirements:
+            with st.expander(f'{req.get("id", "REQ")} · {req.get("requirement", "Requirement")}', expanded=False):
+                left, right = st.columns(2)
+                with left:
+                    st.markdown(f'**Who / subject**\n\n{req.get("subject") or "Not identified in supplied text"}')
+                    st.markdown(f'**Required action**\n\n{req.get("action") or req.get("requirement", "Not identified")}')
+                    st.markdown(f'**Object**\n\n{req.get("object") or "Not identified in supplied text"}')
+                    st.markdown(f'**Applicability / scope**\n\n{req.get("scope") or "Not identified in supplied text"}')
+                with right:
+                    st.markdown(f'**Conditions / thresholds**\n\n{", ".join(req.get("conditions", [])) or "None explicitly identified"}')
+                    st.markdown(f'**Exceptions**\n\n{", ".join(req.get("exceptions", [])) or "None explicitly identified"}')
+                    st.markdown(f'**Cross-references**\n\n{", ".join(req.get("cross_references", [])) or "None explicitly identified"}')
+                interpretation = req.get("interpretation", {})
+                if interpretation:
+                    st.markdown("**Regulatory interpretation**")
+                    st.write(interpretation.get("operative_obligation") or req.get("requirement", ""))
+                    st.markdown(f'**Applicability reasoning:** {interpretation.get("applicability") or "Not identified"}')
+                    if interpretation.get("qualifiers"):
+                        st.markdown("**Qualifiers:** " + "; ".join(interpretation["qualifiers"]))
+                    if interpretation.get("dependencies"):
+                        st.markdown("**Dependencies:** " + "; ".join(interpretation["dependencies"]))
+                    if interpretation.get("obligation_elements"):
+                        st.markdown("**Testable obligation elements**")
+                        for element in interpretation["obligation_elements"]:
+                            st.markdown(f'- **{element.get("element_type", "Element")}:** {element.get("element", "")}')
+                            if element.get("evidence_test"):
+                                st.caption("Evidence test: " + element["evidence_test"])
+                    if interpretation.get("verification_questions"):
+                        st.markdown("**Questions to verify**")
+                        for q in interpretation["verification_questions"]:
+                            st.markdown("- " + q)
+                    if interpretation.get("interpretation_notes"):
+                        st.info(interpretation["interpretation_notes"])
+                src = req.get("source", {})
+                st.caption(f'Source: {src.get("filename", "Unknown")} · {src.get("reference") or "reference not identified"} · page {src.get("page") or "unknown"}')
+                if req.get("unresolved_references"):
+                    st.warning("Unresolved regulatory references: " + ", ".join(req["unresolved_references"]))
+        if st.button("Continue to Gap Analysis", type="primary", key="go_gap_analysis"):
+            st.session_state.page = "Gap Analysis"
+            st.rerun()
 
 # -----------------------------------------------------------------------------
-# Gap Analysis
+# Feature 2: Gap Analysis
 # -----------------------------------------------------------------------------
 elif page == "Gap Analysis":
-    st.markdown('<div class="section-title"><h2>New Gap Analysis</h2><p>Compare regulatory requirements against client evidence and surface traceable potential gaps.</p></div>', unsafe_allow_html=True)
-    st.markdown('<div class="workflow"><span class="workflow-step">1 · Regulation</span><span class="workflow-arrow">→</span><span class="workflow-step">2 · Requirements</span><span class="workflow-arrow">→</span><span class="workflow-step">3 · Evidence</span><span class="workflow-arrow">→</span><span class="workflow-step">4 · Assessment</span></div>', unsafe_allow_html=True)
-
-    assessment_name = st.text_input("Assessment name", value=st.session_state.assessment_name, placeholder="e.g. Unilever — ESRS E1 Gap Analysis", key="assessment_name_input")
-    if assessment_name != st.session_state.assessment_name:
-        st.session_state.assessment_name = assessment_name
-
-    if not st.session_state.reg_docs:
-        st.warning("Upload the regulatory framework in the sidebar first.")
+    st.markdown('<div class="section-title"><h2>Gap Analysis</h2><p>Assess the selected client evidence against the obligations prepared in Obligation Intelligence.</p></div>', unsafe_allow_html=True)
+    st.markdown('<div class="workflow"><span class="workflow-step">Regulation</span><span class="workflow-arrow">→</span><span class="workflow-step">Structured obligations</span><span class="workflow-arrow">→</span><span class="workflow-step">Client evidence</span><span class="workflow-arrow">→</span><span class="workflow-step">Assessment</span></div>', unsafe_allow_html=True)
+    st.session_state.assessment_name = st.text_input("Assessment name", value=st.session_state.assessment_name, placeholder="e.g. Company — ESRS E1", key="assessment_name_input")
+    if not st.session_state.structured_requirements:
+        st.warning("First prepare obligations in the Obligation Intelligence section.")
     if not st.session_state.client_docs:
-        st.info("Upload the client's supporting documents in the sidebar. These are kept separate from the regulatory corpus.")
-
-    if st.session_state.reg_docs and st.session_state.client_docs:
-        st.info("Coverage note: the current workflow extracts a limited set of requirements for each run. This is a focused assessment sample, not a completeness-certified review of the entire standard.")
+        st.info("Upload client evidence PDFs using the sidebar.")
+    if st.session_state.structured_requirements and st.session_state.client_docs:
+        st.caption(f"Ready to assess {len(st.session_state.structured_requirements)} structured obligations against {len(st.session_state.client_docs)} evidence document(s).")
         if st.button("Run Gap Analysis", type="primary"):
-            if not api_key:
-                st.error("System configuration issue — please contact support.")
+            if trial_exceeded(st.session_state.account_token):
+                render_trial_blocked(st, st.session_state.account_token)
+            elif not api_key:
+                st.error("System configuration issue — GEMINI_API_KEY is not configured.")
             else:
-                with st.spinner("Reading requirements → searching client evidence → assessing findings..."):
-                    # Use several complementary queries, deduplicate by stable chunk identity,
-                    # and keep the result explicitly described as a sample rather than a complete
-                    # inventory of every obligation in the uploaded standard.
-                    assessment_query = st.session_state.assessment_name.strip()
-                    base_queries = [
-                        assessment_query or "regulatory disclosure requirements",
-                        "applicability scope thresholds exceptions conditions disclosure requirements",
-                        "policies actions targets metrics transition plans obligations",
-                        "definitions cross references reporting requirements disclosure requirements",
-                    ]
-                    selected_chunks = []
-                    seen_chunk_keys = set()
-                    per_query = max(6, min(10, TOP_K))
-                    for query in base_queries:
-                        matches = reg_store.retrieve(query, top_k=per_query)
-                        for chunk in matches:
-                            key = (chunk.get("source"), chunk.get("id") or chunk.get("index"), chunk.get("text", "")[:100])
-                            if key not in seen_chunk_keys:
-                                seen_chunk_keys.add(key)
-                                selected_chunks.append(chunk)
-                    req_chunks = reg_registry.add_identity_context(assessment_query or base_queries[1], selected_chunks)
-                    reqs = prepare_requirements(req_chunks, api_key=api_key, max_requirements=10, corpus_chunks=reg_store.chunks)
-                    if not reqs:
-                        st.error("ClariX could not identify structured requirements from the selected regulatory documents.")
-                    else:
-                        results = run_gap_analysis(reqs, client_store, api_key=api_key, evidence_top_k=4)
-                        st.session_state.structured_requirements = reqs
-                        st.session_state.gap_results = results
-                        st.session_state.assessment_id = f"CLX-{datetime.now().strftime('%Y%m%d-%H%M')}"
-                        st.session_state.selected_finding = results[0]["id"] if results else ""
-                        st.rerun()
+                with st.spinner("Matching evidence to each obligation and checking the evidence element by element..."):
+                    results = run_gap_analysis(st.session_state.structured_requirements, client_store, api_key=api_key, evidence_top_k=4)
+                increment_usage(st.session_state.account_token)
+                st.session_state.gap_results = results
+                st.session_state.assessment_id = f"CLX-{datetime.now().strftime('%Y%m%d-%H%M')}"
+                st.session_state.selected_finding = results[0]["id"] if results else ""
+                if results:
+                    st.success("Gap analysis completed. Review every result before relying on it.")
+                else:
+                    st.error("No assessment results were returned.")
 
     if st.session_state.gap_results:
         results = st.session_state.gap_results
         counts = gap_counts(results)
-        st.markdown('<div class="section-title"><h2>Assessment summary</h2><p>Evidence-based indication only. Consultant review remains required.</p></div>', unsafe_allow_html=True)
-        a,b,c,d,e,f = st.columns(6)
-        a.markdown(metric_card(len(results), "Reviewed"), unsafe_allow_html=True)
-        b.markdown(metric_card(counts["Addressed"], "Addressed"), unsafe_allow_html=True)
-        c.markdown(metric_card(counts["Partially addressed"], "Partial"), unsafe_allow_html=True)
-        d.markdown(metric_card(counts["Potential gap"], "Potential gaps"), unsafe_allow_html=True)
-        e.markdown(metric_card(counts["Insufficient evidence"], "Insufficient evidence"), unsafe_allow_html=True)
-        f.markdown(metric_card(counts["Assessment failed"], "Assessment failed"), unsafe_allow_html=True)
-
+        st.markdown('<div class="section-title"><h3>Assessment summary</h3><p>Evidence-based indications only. Consultant review remains required.</p></div>', unsafe_allow_html=True)
+        cols = st.columns(5)
+        labels = [("Reviewed", len(results)), ("Addressed", counts["Addressed"]), ("Partial", counts["Partially addressed"]), ("Potential gaps", counts["Potential gap"]), ("Insufficient evidence", counts["Insufficient evidence"])]
+        for col, (label, value) in zip(cols, labels):
+            col.markdown(metric_card(value, label), unsafe_allow_html=True)
+        if counts["Assessment failed"]:
+            st.warning(f'{counts["Assessment failed"]} assessment(s) failed technically and need to be rerun or reviewed.')
         st.markdown("### Findings")
         for idx, item in enumerate(results):
-            a=item.get("assessment",{}); status=a.get("status","Potential gap")
-            st.markdown(f'<div class="finding"><div class="finding-id">{html.escape(item.get("id",""))}</div><div class="finding-title">{html.escape(item.get("requirement",""))}</div>{badge(status)} <span style="color:#7895a5;font-size:11px">{html.escape(a.get("assessment",""))}</span></div>', unsafe_allow_html=True)
+            assessment = item.get("assessment", {})
+            st.markdown(f'<div class="finding"><div class="finding-id">{html.escape(item.get("id", ""))}</div><div class="finding-title">{html.escape(item.get("requirement", ""))}</div>{badge(assessment.get("status", "Insufficient evidence"))}<div>{html.escape(assessment.get("assessment", ""))}</div></div>', unsafe_allow_html=True)
             if st.button(f'Open finding · {item.get("id")}', key=f'open_{item.get("id")}_{idx}'):
-                st.session_state.selected_finding = item.get("id","")
-
+                st.session_state.selected_finding = item.get("id", "")
         selected = next((x for x in results if x.get("id") == st.session_state.selected_finding), results[0])
         st.markdown("---")
         st.markdown("### Finding detail")
         render_finding(selected, results.index(selected))
+        st.download_button("Export gap analysis (PDF)", build_gap_report(results, st.session_state.assessment_name, st.session_state.assessment_id), file_name=f'{st.session_state.assessment_id or "clarix-gap-analysis"}.pdf', mime="application/pdf")
 
-        st.download_button("Export assessment report (PDF)", build_gap_report(results, st.session_state.assessment_name, st.session_state.assessment_id), file_name=f"{st.session_state.assessment_id or 'clarix-assessment'}.pdf", mime="application/pdf")
-
-
-# -----------------------------------------------------------------------------
-# Documents
-# -----------------------------------------------------------------------------
-elif page == "Documents":
-    st.markdown('<div class="section-title"><h2>Documents</h2><p>Regulatory sources and client evidence are indexed separately.</p></div>', unsafe_allow_html=True)
-    a,b = st.columns(2)
-    with a:
-        st.markdown("### Regulatory framework")
-        if st.session_state.reg_docs:
-            for name in st.session_state.reg_docs:
-                info=reg_registry.docs.get(name,{})
-                st.markdown(f'<div class="finding"><b>{html.escape(name)}</b><br><span style="color:#7895a5;font-size:11px">{info.get("pages") or "?"} pages · indexed into {sum(1 for c in reg_store.chunks if c.get("source")==name)} chunks</span></div>', unsafe_allow_html=True)
-        else: st.caption("No regulatory documents uploaded.")
-    with b:
-        st.markdown("### Client evidence")
-        if st.session_state.client_docs:
-            for name in st.session_state.client_docs:
-                info=client_registry.docs.get(name,{})
-                st.markdown(f'<div class="finding"><b>{html.escape(name)}</b><br><span style="color:#7895a5;font-size:11px">{info.get("pages") or "?"} pages · indexed into {sum(1 for c in client_store.chunks if c.get("source")==name)} chunks</span></div>', unsafe_allow_html=True)
-        else: st.caption("No client evidence uploaded.")
-
-
-# -----------------------------------------------------------------------------
-# Reports
-# -----------------------------------------------------------------------------
-elif page == "Reports":
-    st.markdown('<div class="section-title"><h2>Reports</h2><p>Export the evidence chain and assessment findings for consultant review.</p></div>', unsafe_allow_html=True)
-    if not st.session_state.gap_results:
-        st.info("Run a gap analysis first. Your report will appear here.")
-    else:
-        results=st.session_state.gap_results
-        counts=gap_counts(results)
-        st.markdown('<div class="hero"><div class="hero-kicker">Evidence-led compliance review</div><h1>Regulatory Gap Analysis</h1><p>Prepared for consultant review · Assessment report</p></div>', unsafe_allow_html=True)
-        a,b,c,d,e,f=st.columns(6)
-        a.markdown(metric_card(len(results),"Reviewed"),unsafe_allow_html=True)
-        b.markdown(metric_card(counts["Addressed"],"Addressed"),unsafe_allow_html=True)
-        c.markdown(metric_card(counts["Partially addressed"],"Partial"),unsafe_allow_html=True)
-        d.markdown(metric_card(counts["Potential gap"],"Potential gaps"),unsafe_allow_html=True)
-        e.markdown(metric_card(counts["Insufficient evidence"],"Insufficient evidence"),unsafe_allow_html=True)
-        f.markdown(metric_card(counts["Assessment failed"],"Assessment failed"),unsafe_allow_html=True)
-        st.markdown("### Executive summary")
-        st.write(f"ClariX reviewed {len(results)} structured regulatory requirements against the selected client evidence. {counts['Potential gap']} potential gaps and {counts['Partially addressed']} partially addressed requirements were identified for consultant review.")
-        st.markdown("### Findings")
-        for item in results:
-            st.markdown(f"**{item.get('id')} · {item.get('assessment',{}).get('status')}** — {item.get('requirement')}")
-        st.download_button("Download PDF report", build_gap_report(results, st.session_state.assessment_name, st.session_state.assessment_id), file_name=f"{st.session_state.assessment_id or 'clarix-report'}.pdf", mime="application/pdf")
-
-
-# -----------------------------------------------------------------------------
-# Accuracy test
-# -----------------------------------------------------------------------------
-elif page == "Accuracy Test":
-    st.markdown('<div class="section-title"><h2>System Accuracy Evaluation</h2><p>Internal benchmark for retrieval and citation behaviour. This is a testing tool, not a customer-facing accuracy guarantee.</p></div>', unsafe_allow_html=True)
-    if not st.session_state.reg_docs:
-        st.info("Upload regulatory documents first.")
-    elif not api_key:
-        st.warning("System configuration issue — please contact support.")
-    else:
-        if st.button("Run accuracy test"):
-            from tests.accuracy_test import run_accuracy_test
-            with st.spinner("Running the benchmark questions..."):
-                st.session_state.test_results = run_accuracy_test(reg_store, api_key, top_k=TOP_K, registry=reg_registry)
-        r=st.session_state.test_results
-        if r:
-            a,b,c=st.columns(3)
-            a.markdown(metric_card(f"{r['accuracy_pct']}%","Overall benchmark score"),unsafe_allow_html=True)
-            b.markdown(metric_card(f"{r['passed']}/{r['total']}","Tests passed"),unsafe_allow_html=True)
-            cited=sum(1 for x in r["results"] if x["cited"])
-            c.markdown(metric_card(f"{cited}/{r['total']}","Cited answers"),unsafe_allow_html=True)
-            for x in r["results"]:
-                with st.expander(f"{x['status']} · {x['question']}"):
-                    st.write(x["answer"])
-                    st.caption(f"Retrieved chunks: {x['n_chunks']} · Cited: {'yes' if x['cited'] else 'no'}")
-
-
-# -----------------------------------------------------------------------------
-# Admin — manual subscription activation and expiry management
-# -----------------------------------------------------------------------------
-elif page == "Admin":
-    render_admin_panel()
-
-
-# -----------------------------------------------------------------------------
-# Footer
-# -----------------------------------------------------------------------------
 st.markdown("---")
 st.caption("ClariX Intelligence · Evidence-based indication · Consultant review required")

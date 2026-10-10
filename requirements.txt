@@ -6,3 +6,5 @@ numpy>=1.24.0
 reportlab
 python-docx
 pdfplumber
+
+psycopg[binary]>=3.2
