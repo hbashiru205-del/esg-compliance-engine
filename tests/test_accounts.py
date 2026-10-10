@@ -46,5 +46,42 @@ class AccountTests(unittest.TestCase):
         self.assertTrue(salt)
 
 
+    def test_lockout_after_repeated_wrong_passwords_and_reset_on_success(self):
+        token = accounts.create_user("lock_user", "correct-horse-123", "Lock User")
+        for _ in range(accounts.MAX_FAILED_LOGINS - 1):
+            self.assertIsNone(accounts.authenticate_user("lock_user", "wrong-password"))
+        self.assertEqual(accounts.login_lockout_seconds("lock_user"), 0)
+        # a success before the limit resets the counter
+        self.assertEqual(accounts.authenticate_user("lock_user", "correct-horse-123"), token)
+        for _ in range(accounts.MAX_FAILED_LOGINS):
+            accounts.authenticate_user("lock_user", "wrong-password")
+        self.assertGreater(accounts.login_lockout_seconds("lock_user"), 0)
+        # while locked, even the correct password is refused
+        self.assertIsNone(accounts.authenticate_user("lock_user", "correct-horse-123"))
+
+    def test_lockout_applies_to_unknown_usernames_too(self):
+        for _ in range(accounts.MAX_FAILED_LOGINS):
+            accounts.authenticate_user("nobody_here", "whatever-123")
+        self.assertGreater(accounts.login_lockout_seconds("nobody_here"), 0)
+
+    def test_lock_expires(self):
+        accounts.create_user("expire_user", "correct-horse-123", "Expire User")
+        for _ in range(accounts.MAX_FAILED_LOGINS):
+            accounts.authenticate_user("expire_user", "wrong-password")
+        conn = accounts._connect()
+        try:
+            conn.execute("UPDATE login_attempts SET locked_until = 1 WHERE username='expire_user'"); conn.commit()
+        finally:
+            conn.close()
+        self.assertEqual(accounts.login_lockout_seconds("expire_user"), 0)
+        self.assertIsNotNone(accounts.authenticate_user("expire_user", "correct-horse-123"))
+
+    def test_password_material_never_returned(self):
+        token = accounts.create_user("leak_user", "correct-horse-123", "Leak User")
+        self.assertFalse({"password_hash", "password_salt"} & set(accounts.get_account(token)))
+        for row in accounts.list_accounts():
+            self.assertFalse({"password_hash", "password_salt"} & set(row))
+
+
 if __name__ == "__main__":
     unittest.main()

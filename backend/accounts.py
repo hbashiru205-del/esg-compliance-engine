@@ -1,5 +1,5 @@
 """Persistent accounts with manual subscription expiry."""
-import hashlib, hmac, re, secrets, sqlite3
+import hashlib, hmac, re, secrets, sqlite3, time
 from datetime import date
 from pathlib import Path
 
@@ -9,6 +9,8 @@ _DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 _USERNAME_RE = re.compile(r"^[A-Za-z0-9_.-]{3,32}$")
 _HASH_ROUNDS = 600_000
 _SECRET_COLUMNS = ("password_salt", "password_hash")  # never returned to callers
+MAX_FAILED_LOGINS = 5          # consecutive wrong passwords before a temporary lock
+LOCKOUT_SECONDS = 15 * 60
 
 def _connect():
     conn = sqlite3.connect(DB_PATH, timeout=15)
@@ -32,6 +34,8 @@ def _connect():
         if col not in cols:
             conn.execute(f"ALTER TABLE accounts ADD COLUMN {col} {definition}")
     conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_accounts_username ON accounts(username) WHERE username IS NOT NULL")
+    # Tracked per typed username (even unknown ones) so locking does not reveal which usernames exist.
+    conn.execute("CREATE TABLE IF NOT EXISTS login_attempts (username TEXT PRIMARY KEY, failures INTEGER NOT NULL DEFAULT 0, locked_until REAL NOT NULL DEFAULT 0)")
     conn.commit()
     return conn
 
@@ -167,22 +171,67 @@ def create_user(username, password, account_name):
         conn.close()
     return token
 
+def login_lockout_seconds(username):
+    """Seconds remaining before this username may try again (0 if not locked)."""
+    username = normalize_username(username)
+    if not username:
+        return 0
+    conn = _connect()
+    try:
+        row = conn.execute("SELECT locked_until FROM login_attempts WHERE username = ?", (username,)).fetchone()
+    finally:
+        conn.close()
+    remaining = (row["locked_until"] - time.time()) if row else 0
+    return int(remaining) + 1 if remaining > 0 else 0
+
+def _record_login_failure(username):
+    conn = _connect()
+    try:
+        row = conn.execute("SELECT failures, locked_until FROM login_attempts WHERE username = ?", (username,)).fetchone()
+        failures = (row["failures"] if row else 0) + 1
+        locked_until = 0.0
+        if failures >= MAX_FAILED_LOGINS:
+            locked_until, failures = time.time() + LOCKOUT_SECONDS, 0
+        conn.execute("INSERT INTO login_attempts (username, failures, locked_until) VALUES (?, ?, ?) "
+                     "ON CONFLICT(username) DO UPDATE SET failures=excluded.failures, locked_until=excluded.locked_until",
+                     (username, failures, locked_until))
+        conn.commit()
+    finally:
+        conn.close()
+
+def _clear_login_failures(username):
+    conn = _connect()
+    try:
+        conn.execute("DELETE FROM login_attempts WHERE username = ?", (username,))
+        conn.commit()
+    finally:
+        conn.close()
+
 def authenticate_user(username, password):
     username = normalize_username(username)
     if not username or not password or len(password) > 1024:
         return None
+    if login_lockout_seconds(username) > 0:
+        return None            # locked: do not even test the password
     conn = _connect()
     try:
         row = conn.execute("SELECT token, password_salt, password_hash FROM accounts WHERE username = ?",
                            (username,)).fetchone()
     finally:
         conn.close()
+    token = None
     if not row or not row["password_salt"] or not row["password_hash"]:
         # Spend similar time as a real check so unknown usernames are not revealed by timing.
         _password_hash(password, "00" * 16)
-        return None
-    try:
-        candidate = _password_hash(password, row["password_salt"])
-    except (ValueError, TypeError):
-        return None
-    return row["token"] if hmac.compare_digest(candidate, row["password_hash"]) else None
+    else:
+        try:
+            candidate = _password_hash(password, row["password_salt"])
+            if hmac.compare_digest(candidate, row["password_hash"]):
+                token = row["token"]
+        except (ValueError, TypeError):
+            token = None
+    if token:
+        _clear_login_failures(username)
+    else:
+        _record_login_failure(username)
+    return token

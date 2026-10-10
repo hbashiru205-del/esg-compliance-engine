@@ -16,7 +16,7 @@ from backend.doc_registry import DocRegistry
 from backend.export_ui import export_buttons
 from backend.excerpts_ui import make_excerpt_records, render_excerpts
 from backend.trial_gate import trial_exceeded, render_trial_status, render_trial_blocked
-from backend.accounts import valid_name, valid_username, create_user, authenticate_user, get_account, increment_usage
+from backend.accounts import valid_name, valid_username, create_user, authenticate_user, login_lockout_seconds, get_account, increment_usage
 from backend.admin_ui import render_admin_panel
 from config.settings import CHUNK_SIZE, CHUNK_OVERLAP, TOP_K
 
@@ -199,8 +199,11 @@ if account is None:
             remember_me = st.checkbox("Remember this browser", value=True, key="remember_login")
             login_submit = st.form_submit_button("Log in", type="primary", use_container_width=True)
         if login_submit:
-            token = authenticate_user(login_username, login_password)
-            if token:
+            wait = login_lockout_seconds(login_username)
+            token = None if wait else authenticate_user(login_username, login_password)
+            if wait:
+                st.error(f"Too many failed attempts. Please try again in about {max(1, -(-wait // 60))} minute(s).")
+            elif token:
                 st.session_state.account_token = token
                 if remember_me:
                     st.query_params["acct"] = token
@@ -482,6 +485,10 @@ with st.sidebar:
     if st.button("Clear workspace"):
         clear_all(); st.rerun()
     if st.button("Log out", key="logout_button"):
+        clear_all()   # never leave one user's documents, chat or findings in the session for the next login
+        st.session_state.test_results = None
+        st.session_state.selected_finding = ""
+        st.session_state.page = "Dashboard"
         st.session_state.account_token = ""
         st.query_params.clear()
         st.rerun()
