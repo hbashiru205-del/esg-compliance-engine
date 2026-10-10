@@ -363,6 +363,19 @@ def render_finding(item, idx):
                 st.markdown(f"**Confidence**\n\n{interpretation.get('confidence','Medium')}")
             if interpretation.get("interpretation_notes"):
                 st.info(interpretation["interpretation_notes"])
+            elements = interpretation.get("obligation_elements", [])
+            if elements:
+                st.markdown("**Obligation checklist**")
+                st.caption("Each item is a separate testable element. Reviewer confirmation is still required.")
+                for element in elements:
+                    st.markdown(f"- **{html.escape(element.get('element_type', 'Duty'))}:** {html.escape(element.get('element', ''))}")
+                    if element.get("evidence_test"):
+                        st.caption("Evidence test: " + element["evidence_test"])
+            questions = interpretation.get("verification_questions", [])
+            if questions:
+                st.markdown("**Verify before concluding**")
+                for question in questions:
+                    st.markdown(f"- {html.escape(question)}")
         unresolved = item.get("unresolved_references", [])
         if unresolved:
             st.warning("Unresolved regulatory references: " + ", ".join(unresolved) + ". Verify these provisions before relying on the finding.")
@@ -374,10 +387,25 @@ def render_finding(item, idx):
     )
     st.markdown("#### Evidence chain")
     evidence_chain(item)
+    checks = assessment.get("element_checks", [])
+    if checks:
+        st.markdown("#### Element-by-element evidence check")
+        for check in checks:
+            label = f"**{html.escape(check.get('status', 'Unclear'))}** — {html.escape(check.get('element', ''))}"
+            st.markdown(label)
+            if check.get("evidence_quote"):
+                st.markdown(f"> {html.escape(check['evidence_quote'])}")
+                src = check.get("source", {})
+                if src:
+                    st.caption(" · ".join(str(src.get(k)) for k in ("filename", "reference", "page") if src.get(k)))
+            if check.get("note"):
+                st.caption(check["note"])
     if assessment.get("missing_elements"):
         st.markdown("#### Elements not demonstrated")
         for x in assessment["missing_elements"]:
             st.markdown(f"- {x}")
+    for question in assessment.get("verification_questions", []):
+        st.warning("Verification needed: " + question)
     st.caption("Evidence-based indication · Consultant review required")
 
 

@@ -318,6 +318,31 @@ def _semantic_context(requirement: dict) -> str:
     return "\n\n".join(parts)
 
 
+def _normalise_obligation_elements(value) -> list[dict]:
+    """Validate the model's atomic obligation checklist without inventing elements."""
+    if not isinstance(value, list):
+        return []
+    allowed = {"Duty", "Condition", "Threshold", "Deadline", "Exception", "Dependency"}
+    result = []
+    seen = set()
+    for item in value:
+        if not isinstance(item, dict):
+            continue
+        element = str(item.get("element", "")).strip()
+        if not element or element.casefold() in seen:
+            continue
+        seen.add(element.casefold())
+        kind = str(item.get("element_type", "Duty")).strip().title()
+        if kind not in allowed:
+            kind = "Duty"
+        result.append({
+            "element": element,
+            "element_type": kind,
+            "evidence_test": str(item.get("evidence_test", "")).strip(),
+        })
+    return result[:12]
+
+
 def enrich_requirements(requirements: list[dict], api_key: str | None = None) -> list[dict]:
     """Apply one batched semantic regulatory-understanding pass.
 
@@ -367,6 +392,12 @@ its id. Each object must contain:
 - dependencies: provisions that must be read together with this requirement
 - interpretation_notes: 1-3 short sentences explaining how related provisions
   change, qualify, or clarify the requirement
+- obligation_elements: array of atomic, independently checkable elements. Each
+  object must have element (one duty/condition/threshold/deadline/exception),
+  element_type (Duty, Condition, Threshold, Deadline, Exception, Dependency),
+  and evidence_test (what observable evidence would support that element)
+- verification_questions: unresolved facts or cross-references that a reviewer
+  must verify before a confident applicability or compliance conclusion
 - confidence: exactly "High", "Medium", or "Low"
 
 Important:
@@ -407,6 +438,8 @@ INPUT REQUIREMENTS:
             "definitions": _normalise_list(semantic.get("definitions", [])),
             "dependencies": _normalise_list(semantic.get("dependencies", [])),
             "interpretation_notes": str(semantic.get("interpretation_notes", "")).strip(),
+            "obligation_elements": _normalise_obligation_elements(semantic.get("obligation_elements", [])),
+            "verification_questions": _normalise_list(semantic.get("verification_questions", [])),
             "confidence": semantic.get("confidence") if semantic.get("confidence") in {"High", "Medium", "Low"} else "Medium",
         }
     return requirements
@@ -446,6 +479,14 @@ def _evidence_context(evidence_chunks: list[dict], max_chars: int = 4500) -> str
     return "\n".join(parts) if parts else "No matching evidence was retrieved."
 
 
+def _quote_in_evidence(quote: str, evidence_chunks: list[dict]) -> bool:
+    """True if the quote occurs verbatim (ignoring whitespace/line-break differences) in the evidence."""
+    q = " ".join(str(quote).split())
+    if not q:
+        return False
+    return any(q in " ".join(str(c.get("text", "")).split()) for c in evidence_chunks)
+
+
 def assess_requirement(requirement: dict, evidence_chunks: list[dict], api_key: str | None = None) -> dict:
     """Assess a requirement against client evidence using the resolved regulatory meaning."""
     key = api_key or GEMINI_API_KEY
@@ -462,6 +503,12 @@ Return JSON only with:
 - assessment: 1-3 sentences grounded in the evidence and the structured obligation
 - evidence_used: array of objects with filename, page, reference, and short quote
 - missing_elements: specific elements of the obligation not demonstrated
+- element_checks: one object per supplied obligation_elements entry, with
+  element (copy the element text), status ("Supported", "Partially supported",
+  "Not demonstrated", or "Unclear"), evidence_quote (short exact quote from
+  supplied evidence, or empty string), source (filename/page/reference if known),
+  and note (brief explanation)
+- verification_questions: unresolved facts that prevent a confident conclusion
 
 Rules:
 1. Test the evidence against the operative obligation AND its applicability/qualifiers.
@@ -472,6 +519,14 @@ Rules:
 6. Potential gap only when relevant evidence is available and a material obligation appears not to be met.
 7. Never invent client evidence or make a legal conclusion of non-compliance.
 8. If a regulatory dependency remains unresolved, flag it as a verification point.
+9. Assess each supplied atomic element separately. A related topic is not proof
+   that a specific obligation is met. Evidence quotes must be exact substrings
+   of supplied evidence; otherwise leave evidence_quote empty and mark Unclear.
+10. Do not treat a missing disclosure in the uploaded evidence as proof that the
+    organisation failed to comply; distinguish "not found in these documents"
+    from an established failure.
+11. Copy every obligation element into element_checks exactly once. Do not add
+    new obligation elements during evidence assessment.
 
 STRUCTURED REQUIREMENT:
 {json.dumps(requirement, indent=2)}
@@ -511,11 +566,47 @@ CLIENT EVIDENCE:
     evidence = parsed.get("evidence_used", [])
     if not isinstance(evidence, list):
         evidence = []
+    verified_evidence = []
+    for ev in evidence:
+        if not isinstance(ev, dict):
+            continue
+        ev = dict(ev)
+        quote = str(ev.get("quote", "")).strip()
+        # A quotation that is not found in the retrieved evidence must not be shown as a citation.
+        if quote and not _quote_in_evidence(quote, evidence_chunks):
+            ev["quote"] = ""
+            ev["quote_unverified"] = True
+        verified_evidence.append(ev)
+    evidence = verified_evidence
+    element_checks = parsed.get("element_checks", [])
+    if not isinstance(element_checks, list):
+        element_checks = []
+    allowed_element_statuses = {"Supported", "Partially supported", "Not demonstrated", "Unclear"}
+    clean_checks = []
+    for check in element_checks:
+        if not isinstance(check, dict) or not str(check.get("element", "")).strip():
+            continue
+        quote = str(check.get("evidence_quote", "")).strip()
+        # Prevent the model from presenting a fabricated quotation as an exact citation.
+        if quote and not _quote_in_evidence(quote, evidence_chunks):
+            quote = ""
+            check_status = "Unclear"
+        else:
+            check_status = check.get("status") if check.get("status") in allowed_element_statuses else "Unclear"
+        clean_checks.append({
+            "element": str(check.get("element", "")).strip(),
+            "status": check_status,
+            "evidence_quote": quote,
+            "source": check.get("source") if isinstance(check.get("source"), dict) else {},
+            "note": str(check.get("note", "")).strip(),
+        })
     return {
         "status": status,
         "assessment": assessment_text,
         "evidence": evidence,
         "missing_elements": _normalise_list(parsed.get("missing_elements", [])),
+        "element_checks": clean_checks,
+        "verification_questions": _normalise_list(parsed.get("verification_questions", [])),
     }
 
 
