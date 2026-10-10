@@ -450,7 +450,7 @@ def assess_requirement(requirement: dict, evidence_chunks: list[dict], api_key: 
     """Assess a requirement against client evidence using the resolved regulatory meaning."""
     key = api_key or GEMINI_API_KEY
     if not key:
-        return {"status": "Potential gap", "assessment": "AI assessment unavailable.", "evidence": [], "missing_elements": []}
+        return {"status": "Assessment failed", "assessment": "Assessment could not run because the Gemini API key is not configured.", "evidence": [], "missing_elements": [], "error_type": "configuration"}
 
     prompt = f"""
 Assess one regulatory requirement against supplied client-document evidence.
@@ -458,7 +458,7 @@ This is an evidence review, not a legal opinion. Use ONLY the requirement,
 its regulatory interpretation/context, and the supplied client evidence.
 
 Return JSON only with:
-- status: exactly one of "Addressed", "Partially addressed", "Potential gap"
+- status: exactly one of "Addressed", "Partially addressed", "Potential gap", "Insufficient evidence"
 - assessment: 1-3 sentences grounded in the evidence and the structured obligation
 - evidence_used: array of objects with filename, page, reference, and short quote
 - missing_elements: specific elements of the obligation not demonstrated
@@ -468,9 +468,10 @@ Rules:
 2. Apply explicit exceptions only when they are actually established in the supplied context.
 3. Addressed only when the supplied evidence clearly demonstrates the applicable requirement.
 4. Partially addressed when some, but not all, required elements are evidenced.
-5. Potential gap when no relevant evidence is found or material elements are missing.
-6. Never invent client evidence or make a legal conclusion of non-compliance.
-7. If a regulatory dependency remains unresolved, flag it as a verification point.
+5. Insufficient evidence when retrieved passages are absent, too weak, or do not permit a defensible assessment.
+6. Potential gap only when relevant evidence is available and a material obligation appears not to be met.
+7. Never invent client evidence or make a legal conclusion of non-compliance.
+8. If a regulatory dependency remains unresolved, flag it as a verification point.
 
 STRUCTURED REQUIREMENT:
 {json.dumps(requirement, indent=2)}
@@ -490,19 +491,30 @@ CLIENT EVIDENCE:
             ),
         )
         parsed = _extract_json(response.text)
-    except Exception:
-        parsed = None
+    except Exception as exc:
+        return {"status": "Assessment failed", "assessment": "The assessment model call failed. No compliance conclusion was produced.", "evidence": [], "missing_elements": [], "error_type": type(exc).__name__}
 
     if not isinstance(parsed, dict):
-        parsed = {}
+        return {"status": "Assessment failed", "assessment": "The model returned no valid structured assessment. No compliance conclusion was produced.", "evidence": [], "missing_elements": [], "error_type": "invalid_model_response"}
     status = parsed.get("status")
-    if status not in {"Addressed", "Partially addressed", "Potential gap"}:
-        status = "Potential gap" if not evidence_chunks else "Partially addressed"
+    allowed_statuses = {"Addressed", "Partially addressed", "Potential gap", "Insufficient evidence"}
+    if status not in allowed_statuses:
+        status = "Insufficient evidence" if not evidence_chunks else "Insufficient evidence"
 
+    # No retrieved evidence must never be represented as a confirmed gap.
+    if not evidence_chunks and status in {"Potential gap", "Partially addressed", "Addressed"}:
+        status = "Insufficient evidence"
+        assessment_text = "No relevant client evidence was retrieved, so this requirement cannot be assessed from the selected documents."
+    else:
+        assessment_text = str(parsed.get("assessment") or "The model returned no assessment text.").strip()
+
+    evidence = parsed.get("evidence_used", [])
+    if not isinstance(evidence, list):
+        evidence = []
     return {
         "status": status,
-        "assessment": str(parsed.get("assessment") or "No reliable assessment was returned.").strip(),
-        "evidence": parsed.get("evidence_used", []) if isinstance(parsed.get("evidence_used", []), list) else [],
+        "assessment": assessment_text,
+        "evidence": evidence,
         "missing_elements": _normalise_list(parsed.get("missing_elements", [])),
     }
 
@@ -539,10 +551,24 @@ def run_gap_analysis(requirements: list[dict], client_store, api_key: str | None
             index = futures[future]
             try:
                 assessments[index] = future.result()
-            except Exception:
-                assessments[index] = {"status": "Potential gap", "assessment": "No reliable assessment was returned.", "evidence": [], "missing_elements": []}
+            except Exception as exc:
+                assessments[index] = {"status": "Assessment failed", "assessment": "The assessment task failed unexpectedly. No compliance conclusion was produced.", "evidence": [], "missing_elements": [], "error_type": type(exc).__name__}
 
-    return [
-        {**requirement, "assessment": assessments[i] or {"status": "Potential gap", "assessment": "No reliable assessment was returned.", "evidence": [], "missing_elements": []}}
-        for i, (_requirement, _evidence) in enumerate(prepared)
-    ]
+    results = []
+    used_ids = set()
+    for i, (requirement, _evidence) in enumerate(prepared):
+        item = dict(requirement)
+        original_id = str(item.get("id") or "").strip()
+        # Enforce unique stable IDs at the result boundary; stale/duplicate IDs
+        # from upstream extraction must not collapse findings in the UI.
+        candidate = original_id if original_id and original_id not in used_ids else f"REQ-{i + 1:03d}"
+        suffix = 2
+        base = candidate
+        while candidate in used_ids:
+            candidate = f"{base}-{suffix}"
+            suffix += 1
+        item["id"] = candidate
+        used_ids.add(candidate)
+        item["assessment"] = assessments[i] or {"status": "Assessment failed", "assessment": "No assessment result was returned. No compliance conclusion was produced.", "evidence": [], "missing_elements": [], "error_type": "missing_result"}
+        results.append(item)
+    return results

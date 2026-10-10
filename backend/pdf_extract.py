@@ -1,111 +1,97 @@
-"""Fast PDF text extraction for ClariX.
+"""PDF extraction and chunk metadata for ClariX.
 
-Uses pypdf for text extraction. On the two large PDFs supplied for diagnosis,
-pypdf extracted 284/285 pages in about 3/13 seconds, while pdfplumber was
-slow enough on the annual report to exceed a 5-minute benchmark timeout.
-
-Public functions and output structure are kept compatible with the existing
-ClariX app: extract_text_from_pdf(bytes) -> str and
-process_pdf(bytes, filename, chunk_size, overlap) -> (chunks, clean_text).
-Page markers and per-chunk source/page/section metadata are preserved.
+Keeps the public process_pdf/extract_text_from_pdf API while preserving page
+numbers and carrying an ESRS disclosure heading forward to subsequent chunks
+until a new recognized heading is encountered.
 """
 import io
-import logging
 import re
-import time
 
 from pypdf import PdfReader
 from backend.document_processor import clean_text, chunk_text
 
-logger = logging.getLogger(__name__)
-
 _PAGE_RE = re.compile(r"\[Page\s+(\d+)\]", re.IGNORECASE)
-# ESRS disclosure-requirement codes, e.g. E1-6, S1-14, G1-1, GOV-1, SBM-3,
-# IRO-2, BP-1, MDR-A. A code is only used as a chunk's reference when it is
-# acting as a heading (start of a line) or is explicitly labelled
-# "Disclosure Requirement"/"DR". A code merely mentioned inside a sentence
-# (e.g. "see E1-2") is a cross-reference, not what this chunk is about.
-_ESRS_CODE = (
-    r"(?:(?:E[1-5]|S[1-4]|G1)-\d{1,2}"
-    r"|(?:GOV|SBM|IRO|BP)-\d"
-    r"|MDR-[PAMT])"
-)
-_ESRS_HEADING = re.compile(
-    r"(?:^[ \t]*(?:(?:Disclosure\s+Requirement|DR)\s+)?|"
-    r"\b(?:Disclosure\s+Requirement|DR)\s+)"
-    r"(?:ESRS\s+2\s+)?(" + _ESRS_CODE + r")\b",
-    re.MULTILINE,
-)
-
+_ESRS_CODE = r"(?:ESRS\s+2|(?:E|S|G)\d{1,2}-\d{1,3}|GOV-\d{1,2}|SBM-\d{1,2}|IRO-\d{1,2}|BP-\d{1,2}|MDR-[A-Z]{1,3})"
+_ESRS_HEADING_PATTERNS = [
+    re.compile(rf"^\s*({_ESRS_CODE})\s*(?:[.:—–-]\s*)?(?:$|\s+\S)", re.IGNORECASE | re.MULTILINE),
+    re.compile(rf"\b(?:Disclosure Requirement|DR)\s+({_ESRS_CODE})\b", re.IGNORECASE),
+]
 _SECTION_PATTERNS = [
     re.compile(r"\bArticle\s+\d{1,4}[A-Za-z]?\b", re.IGNORECASE),
     re.compile(r"\b(?:paragraph|section|clause)\s+\d{1,4}(?:\.\d+)*[A-Za-z]?\b", re.IGNORECASE),
 ]
 
 
+def _continues_sentence(text: str, pos: int) -> bool:
+    """True if the text after a code on the same line continues in lowercase."""
+    tail = re.sub(r"^[ \t]*[.:\u2014\u2013-]?[ \t]*", "", text[pos:pos + 80])
+    return bool(tail) and tail[0].islower()
+
+
 def _metadata_for_chunk(text: str):
     pages = [int(x) for x in _PAGE_RE.findall(text)]
     page_start = min(pages) if pages else None
     page_end = max(pages) if pages else page_start
-    reference = None
-    heading = _ESRS_HEADING.search(text)
-    if heading:
-        reference = heading.group(1)
-    else:
-        refs = []
-        for rx in _SECTION_PATTERNS:
-            refs.extend(rx.findall(text))
-        reference = refs[0] if refs else None
-    return page_start, page_end, reference
+    esrs_ref = None
+    for idx, rx in enumerate(_ESRS_HEADING_PATTERNS):
+        for match in rx.finditer(text):
+            # A line that merely wraps in the PDF and starts with a code
+            # ("E1-2 and Article 19a ...") continues a sentence; it is a
+            # cross-reference, not a heading. Headings are followed by a
+            # capitalised title or end of line.
+            if idx == 0 and _continues_sentence(text, match.end(1)):
+                continue
+            # Normalize spacing/case without inventing codes.
+            esrs_ref = re.sub(r"\s+", " ", match.group(1)).upper()
+            break
+        if esrs_ref:
+            break
+    refs = []
+    for rx in _SECTION_PATTERNS:
+        refs.extend(m.group(0) for m in rx.finditer(text))
+    return page_start, page_end, esrs_ref or (refs[0] if refs else None)
+
+
+def _page_at_offset(text: str, offset: int):
+    current = None
+    for match in _PAGE_RE.finditer(text, 0, max(0, min(len(text), offset + 1))):
+        current = int(match.group(1))
+    return current
 
 
 def extract_text_from_pdf(file_bytes: bytes) -> str:
-    """Extract text with pypdf, preserving original PDF page numbers."""
-    started = time.perf_counter()
+    """Extract raw text with explicit original PDF page markers using pypdf."""
     pages = []
     reader = PdfReader(io.BytesIO(file_bytes))
-    page_count = len(reader.pages)
     for i, page in enumerate(reader.pages):
         text = page.extract_text() or ""
         if text.strip():
             pages.append(f"[Page {i + 1}]\n{text.strip()}")
-    result = "\n\n".join(pages)
-    logger.info(
-        "PDF extraction: pages=%s, extracted_pages=%s, chars=%s, seconds=%.2f",
-        page_count, len(pages), len(result), time.perf_counter() - started
-    )
-    return result
+    return "\n\n".join(pages)
 
 
 def process_pdf(file_bytes: bytes, filename: str, chunk_size=800, overlap=100):
-    """Full pipeline: bytes -> cleaned chunks with source/page/section metadata."""
-    started = time.perf_counter()
-
-    t0 = time.perf_counter()
+    """Return (chunks, cleaned text), with inherited disclosure/page metadata."""
     raw = extract_text_from_pdf(file_bytes)
-    extract_seconds = time.perf_counter() - t0
-
-    t0 = time.perf_counter()
     clean = clean_text(raw)
-    clean_seconds = time.perf_counter() - t0
-
-    t0 = time.perf_counter()
     chunks = chunk_text(clean, chunk_size, overlap)
-    chunk_seconds = time.perf_counter() - t0
-
-    t0 = time.perf_counter()
+    active_esrs_ref = None
+    active_page = None
     for chunk in chunks:
         chunk["source"] = filename
-        page_start, page_end, reference = _metadata_for_chunk(chunk["text"])
+        start = chunk.get("char_start", 0)
+        page_start, page_end, reference = _metadata_for_chunk(chunk.get("text", ""))
+        if page_start is None:
+            page_start = _page_at_offset(clean, start) or active_page
+        if page_end is None:
+            page_end = page_start
+        if page_start is not None:
+            active_page = page_start
+        if reference and re.fullmatch(_ESRS_CODE, reference, re.IGNORECASE):
+            active_esrs_ref = reference
+        elif reference is None and active_esrs_ref:
+            reference = active_esrs_ref
         chunk["page_start"] = page_start
         chunk["page_end"] = page_end
         chunk["section_reference"] = reference
-    metadata_seconds = time.perf_counter() - t0
-
-    logger.info(
-        "PDF processing for %s: extract=%.2fs, clean=%.2fs, chunk=%.2fs, "
-        "metadata=%.2fs, chunks=%s, total=%.2fs",
-        filename, extract_seconds, clean_seconds, chunk_seconds,
-        metadata_seconds, len(chunks), time.perf_counter() - started
-    )
     return chunks, clean

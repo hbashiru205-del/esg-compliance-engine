@@ -217,6 +217,8 @@ def badge(status: str) -> str:
         "Addressed": "badge-green",
         "Partially addressed": "badge-amber",
         "Potential gap": "badge-red",
+        "Insufficient evidence": "badge-amber",
+        "Assessment failed": "badge-red",
     }.get(status, "badge-amber")
     return f'<span class="badge {cls}">{html.escape(status)}</span>'
 
@@ -256,11 +258,18 @@ def clear_all():
 
 
 def gap_counts(results):
-    counts = {"Addressed": 0, "Partially addressed": 0, "Potential gap": 0}
+    counts = {
+        "Addressed": 0,
+        "Partially addressed": 0,
+        "Potential gap": 0,
+        "Insufficient evidence": 0,
+        "Assessment failed": 0,
+    }
     for item in results:
-        status = item.get("assessment", {}).get("status")
-        if status in counts:
-            counts[status] += 1
+        status = item.get("assessment", {}).get("status", "Insufficient evidence")
+        if status not in counts:
+            status = "Insufficient evidence"
+        counts[status] += 1
     return counts
 
 
@@ -358,8 +367,12 @@ def build_gap_report(results, assessment_name, assessment_id):
     story.append(Paragraph(f"Reference: {html.escape(assessment_id or 'CLX-DEMO')}", styles["BodyText"]))
     counts = gap_counts(results)
     story.append(Spacer(1, 14))
-    story.append(Table([["Requirements reviewed", "Addressed", "Partially addressed", "Potential gaps"], [str(len(results)), str(counts['Addressed']), str(counts['Partially addressed']), str(counts['Potential gap'])]], colWidths=[120,90,120,90], style=TableStyle([('BACKGROUND',(0,0),(-1,0),colors.HexColor('#16485a')),('TEXTCOLOR',(0,0),(-1,0),colors.white),('GRID',(0,0),(-1,-1),.4,colors.HexColor('#b8c9d0')),('ALIGN',(0,0),(-1,-1),'CENTER'),('FONTSIZE',(0,0),(-1,-1),8),('BOTTOMPADDING',(0,0),(-1,-1),7)])))
-    story.append(Spacer(1, 18))
+    summary_headers = ["Reviewed", "Addressed", "Partial", "Potential gaps", "Insufficient evidence", "Assessment failed"]
+    summary_values = [str(len(results)), str(counts["Addressed"]), str(counts["Partially addressed"]), str(counts["Potential gap"]), str(counts["Insufficient evidence"]), str(counts["Assessment failed"])]
+    story.append(Table([summary_headers, summary_values], colWidths=[55,62,55,65,100,75], repeatRows=1, style=TableStyle([('BACKGROUND',(0,0),(-1,0),colors.HexColor('#16485a')),('TEXTCOLOR',(0,0),(-1,0),colors.white),('GRID',(0,0),(-1,-1),.4,colors.HexColor('#b8c9d0')),('ALIGN',(0,0),(-1,-1),'CENTER'),('FONTSIZE',(0,0),(-1,-1),7),('BOTTOMPADDING',(0,0),(-1,-1),7)])))
+    story.append(Spacer(1, 8))
+    story.append(Paragraph("Coverage limitation: this report evaluates only the requirements extracted for this run. It must not be interpreted as confirmation that every applicable requirement in the full standard was reviewed.", styles["Small"]))
+    story.append(Spacer(1, 12))
     for item in results:
         a = item.get("assessment", {})
         src = item.get("source", {})
@@ -374,7 +387,7 @@ def build_gap_report(results, assessment_name, assessment_id):
                 story.append(Paragraph(f"Regulatory interpretation: {html.escape(interp.get('interpretation_notes',''))}", styles["Small"]))
         story.append(Paragraph(f"Assessment: {html.escape(a.get('assessment',''))}", styles["Small"]))
         for ev in a.get("evidence", []):
-            story.append(Paragraph(f"Evidence: {html.escape(ev.get('filename','Unknown'))} · {html.escape(str(ev.get('reference') or 'not identified'))} · {html.escape(ev.get('quote',''))}", styles["Small"]))
+            story.append(Paragraph(f"Evidence: {html.escape(ev.get('filename','Unknown'))} · {html.escape(str(ev.get('reference') or 'not identified'))} · page {html.escape(str(ev.get('page') or 'unknown'))} · {html.escape(ev.get('quote',''))}", styles["Small"]))
         story.append(Spacer(1, 10))
     doc.build(story)
     return buf.getvalue()
@@ -560,15 +573,33 @@ elif page == "Gap Analysis":
         st.info("Upload the client's supporting documents in the sidebar. These are kept separate from the regulatory corpus.")
 
     if st.session_state.reg_docs and st.session_state.client_docs:
+        st.info("Coverage note: the current workflow extracts a limited set of requirements for each run. This is a focused assessment sample, not a completeness-certified review of the entire standard.")
         if st.button("Run Gap Analysis", type="primary"):
             if not api_key:
                 st.error("System configuration issue — please contact support.")
             else:
                 with st.spinner("Reading requirements → searching client evidence → assessing findings..."):
-                    # Use a broad regulatory query to build a requirement set from the selected corpus.
-                    q = "main obligations requirements disclosure targets policies actions transition plan applicability conditions"
-                    req_chunks = reg_store.retrieve(q, top_k=min(12, max(TOP_K, 10)))
-                    req_chunks = reg_registry.add_identity_context(q, req_chunks)
+                    # Use several complementary queries, deduplicate by stable chunk identity,
+                    # and keep the result explicitly described as a sample rather than a complete
+                    # inventory of every obligation in the uploaded standard.
+                    assessment_query = st.session_state.assessment_name.strip()
+                    base_queries = [
+                        assessment_query or "regulatory disclosure requirements",
+                        "applicability scope thresholds exceptions conditions disclosure requirements",
+                        "policies actions targets metrics transition plans obligations",
+                        "definitions cross references reporting requirements disclosure requirements",
+                    ]
+                    selected_chunks = []
+                    seen_chunk_keys = set()
+                    per_query = max(6, min(10, TOP_K))
+                    for query in base_queries:
+                        matches = reg_store.retrieve(query, top_k=per_query)
+                        for chunk in matches:
+                            key = (chunk.get("source"), chunk.get("id") or chunk.get("index"), chunk.get("text", "")[:100])
+                            if key not in seen_chunk_keys:
+                                seen_chunk_keys.add(key)
+                                selected_chunks.append(chunk)
+                    req_chunks = reg_registry.add_identity_context(assessment_query or base_queries[1], selected_chunks)
                     reqs = prepare_requirements(req_chunks, api_key=api_key, max_requirements=10, corpus_chunks=reg_store.chunks)
                     if not reqs:
                         st.error("ClariX could not identify structured requirements from the selected regulatory documents.")
@@ -584,11 +615,13 @@ elif page == "Gap Analysis":
         results = st.session_state.gap_results
         counts = gap_counts(results)
         st.markdown('<div class="section-title"><h2>Assessment summary</h2><p>Evidence-based indication only. Consultant review remains required.</p></div>', unsafe_allow_html=True)
-        a,b,c,d = st.columns(4)
-        a.markdown(metric_card(len(results), "Requirements reviewed"), unsafe_allow_html=True)
+        a,b,c,d,e,f = st.columns(6)
+        a.markdown(metric_card(len(results), "Reviewed"), unsafe_allow_html=True)
         b.markdown(metric_card(counts["Addressed"], "Addressed"), unsafe_allow_html=True)
-        c.markdown(metric_card(counts["Partially addressed"], "Partially addressed"), unsafe_allow_html=True)
+        c.markdown(metric_card(counts["Partially addressed"], "Partial"), unsafe_allow_html=True)
         d.markdown(metric_card(counts["Potential gap"], "Potential gaps"), unsafe_allow_html=True)
+        e.markdown(metric_card(counts["Insufficient evidence"], "Insufficient evidence"), unsafe_allow_html=True)
+        f.markdown(metric_card(counts["Assessment failed"], "Assessment failed"), unsafe_allow_html=True)
 
         st.markdown("### Findings")
         for idx, item in enumerate(results):
@@ -638,11 +671,13 @@ elif page == "Reports":
         results=st.session_state.gap_results
         counts=gap_counts(results)
         st.markdown('<div class="hero"><div class="hero-kicker">Evidence-led compliance review</div><h1>Regulatory Gap Analysis</h1><p>Prepared for consultant review · Assessment report</p></div>', unsafe_allow_html=True)
-        a,b,c,d=st.columns(4)
+        a,b,c,d,e,f=st.columns(6)
         a.markdown(metric_card(len(results),"Reviewed"),unsafe_allow_html=True)
         b.markdown(metric_card(counts["Addressed"],"Addressed"),unsafe_allow_html=True)
-        c.markdown(metric_card(counts["Partially addressed"],"Partially addressed"),unsafe_allow_html=True)
+        c.markdown(metric_card(counts["Partially addressed"],"Partial"),unsafe_allow_html=True)
         d.markdown(metric_card(counts["Potential gap"],"Potential gaps"),unsafe_allow_html=True)
+        e.markdown(metric_card(counts["Insufficient evidence"],"Insufficient evidence"),unsafe_allow_html=True)
+        f.markdown(metric_card(counts["Assessment failed"],"Assessment failed"),unsafe_allow_html=True)
         st.markdown("### Executive summary")
         st.write(f"ClariX reviewed {len(results)} structured regulatory requirements against the selected client evidence. {counts['Potential gap']} potential gaps and {counts['Partially addressed']} partially addressed requirements were identified for consultant review.")
         st.markdown("### Findings")
